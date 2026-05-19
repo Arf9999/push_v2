@@ -68,3 +68,7 @@ All changes to core R/Python scripts and LLM prompts are logged here.
 ### Corrected DB Parameter Binding for SQL Arrays
 - **Files**: `alpha/pipeline_runner.R`, `scratch/run_integration_test.R`
 - **Strategic Intent**: Wrap embedding vectors in nested `list()` before binding in DBI parameter queries to avoid length mismatch errors and correctly bind values as DuckDB FLOAT[] list arrays.
+
+### Added Interactive Sensitivity Slider and Client-Side CSV Export
+- **Files**: `alpha/static/index.html`, `alpha/static/styles.css`, `alpha/static/dashboard.js`
+- **Strategic Intent**: Empower dashboard users to dynamically adjust vector search sensitivity (cosine similarity score thresholds) client-side in real-time. Implement dynamic CSV results export complete with entity resolution mappings, summaries, and match scores.

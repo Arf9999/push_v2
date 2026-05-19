@@ -70,14 +70,21 @@
         <section class="search-section glass-panel animate-fade-in">
             <div class="search-header">
                 <h2>Vector Semantic Search</h2>
-                <div class="vector-space-toggle">
-                    <span class="toggle-label">Search Space:</span>
-                    <button class="btn-toggle active" id="space-english" data-space="english">
-                        <i class="fa-solid fa-flag-usa"></i> English Summaries
-                    </button>
-                    <button class="btn-toggle" id="space-multilingual" data-space="multilingual">
-                        <i class="fa-solid fa-earth-africa"></i> Multilingual Original
-                    </button>
+                <div class="search-options">
+                    <div class="sensitivity-control">
+                        <span class="toggle-label"><i class="fa-solid fa-sliders"></i> Sensitivity:</span>
+                        <input type="range" id="sensitivity-slider" min="10" max="90" value="40" class="slider-input">
+                        <span class="slider-value" id="sensitivity-value">40%</span>
+                    </div>
+                    <div class="vector-space-toggle">
+                        <span class="toggle-label">Search Space:</span>
+                        <button class="btn-toggle active" id="space-english" data-space="english">
+                            <i class="fa-solid fa-flag-usa"></i> English Summaries
+                        </button>
+                        <button class="btn-toggle" id="space-multilingual" data-space="multilingual">
+                            <i class="fa-solid fa-earth-africa"></i> Multilingual Original
+                        </button>
+                    </div>
                 </div>
             </div>
             <form id="search-form" class="search-form-container">
@@ -96,8 +103,13 @@
             <!-- Left Pane: Results -->
             <section class="results-pane">
                 <div class="results-header">
-                    <h2>Search Results</h2>
-                    <span class="results-count" id="results-count">Enter a query to begin</span>
+                    <div class="results-title-group">
+                        <h2>Search Results</h2>
+                        <span class="results-count" id="results-count">Enter a query to begin</span>
+                    </div>
+                    <button class="btn-secondary" id="btn-export-csv" style="display: none;">
+                        <i class="fa-solid fa-file-csv"></i> Export CSV
+                    </button>
                 </div>
                 <div class="results-list" id="results-list">
                     <!-- Cards will be dynamically inserted here -->

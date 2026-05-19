@@ -1,6 +1,8 @@
 // Dashboard State Management
 let activeSearchSpace = "english";
 let languagesChart = null;
+let rawSearchResults = [];
+let currentSearchResults = [];
 
 // Initialize components when DOM loads
 document.addEventListener("DOMContentLoaded", () => {
@@ -19,6 +21,9 @@ function setupEventListeners() {
     const searchForm = document.getElementById("search-form");
     const spaceEnglish = document.getElementById("space-english");
     const spaceMultilingual = document.getElementById("space-multilingual");
+    const btnExportCsv = document.getElementById("btn-export-csv");
+    const sensitivitySlider = document.getElementById("sensitivity-slider");
+    const sensitivityValue = document.getElementById("sensitivity-value");
 
     // Form Submission
     searchForm.addEventListener("submit", (e) => {
@@ -34,6 +39,24 @@ function setupEventListeners() {
     spaceMultilingual.addEventListener("click", () => {
         setActiveSpace("multilingual");
     });
+
+    // Export CSV click listener
+    if (btnExportCsv) {
+        btnExportCsv.addEventListener("click", () => {
+            exportCurrentResultsToCSV();
+        });
+    }
+
+    // Sensitivity slider event listener
+    if (sensitivitySlider) {
+        sensitivitySlider.addEventListener("input", (e) => {
+            const val = e.target.value;
+            if (sensitivityValue) sensitivityValue.innerText = `${val}%`;
+            
+            // Re-render search results in real-time
+            renderSearchResults(rawSearchResults);
+        });
+    }
 }
 
 // Manage Toggle Buttons
@@ -190,9 +213,12 @@ async function executeSearch() {
     
     const resultsList = document.getElementById("results-list");
     const resultsCount = document.getElementById("results-count");
+    const btnExportCsv = document.getElementById("btn-export-csv");
     
     // Show spinner/loading state
     resultsCount.innerText = "Searching vectors...";
+    if (btnExportCsv) btnExportCsv.style.display = "none";
+    
     resultsList.innerHTML = `
         <div class="empty-state">
             <i class="fa-solid fa-circle-notch fa-spin empty-icon"></i>
@@ -210,10 +236,12 @@ async function executeSearch() {
         }
         
         const data = await response.json();
-        renderSearchResults(data.results);
+        rawSearchResults = data.results || [];
+        renderSearchResults(rawSearchResults);
     } catch (err) {
         console.error("Error during search:", err);
         resultsCount.innerText = "Search error occurred";
+        if (btnExportCsv) btnExportCsv.style.display = "none";
         resultsList.innerHTML = `
             <div class="empty-state" style="border-color: #ef4444;">
                 <i class="fa-solid fa-triangle-exclamation empty-icon" style="color: #ef4444;"></i>
@@ -227,10 +255,17 @@ async function executeSearch() {
 function renderSearchResults(results) {
     const resultsList = document.getElementById("results-list");
     const resultsCount = document.getElementById("results-count");
+    const btnExportCsv = document.getElementById("btn-export-csv");
+    const sensitivitySlider = document.getElementById("sensitivity-slider");
     
     resultsList.innerHTML = "";
     
+    const sliderValue = sensitivitySlider ? parseFloat(sensitivitySlider.value) / 100 : 0.40;
+    const filteredResults = (results || []).filter(rec => rec.similarity >= sliderValue);
+    currentSearchResults = filteredResults;
+    
     if (!results || results.length === 0) {
+        if (btnExportCsv) btnExportCsv.style.display = "none";
         resultsCount.innerText = "0 matches found";
         resultsList.innerHTML = `
             <div class="empty-state">
@@ -241,9 +276,22 @@ function renderSearchResults(results) {
         return;
     }
     
-    resultsCount.innerText = `Found ${results.length} matches sorted by relevance`;
+    if (filteredResults.length === 0) {
+        if (btnExportCsv) btnExportCsv.style.display = "none";
+        resultsCount.innerText = `0 matches above threshold (Threshold: ${Math.round(sliderValue * 100)}%)`;
+        resultsList.innerHTML = `
+            <div class="empty-state">
+                <i class="fa-solid fa-sliders empty-icon"></i>
+                <p>No matches found with similarity >= ${Math.round(sliderValue * 100)}%. Try lowering the sensitivity slider.</p>
+            </div>
+        `;
+        return;
+    }
     
-    results.forEach(rec => {
+    if (btnExportCsv) btnExportCsv.style.display = "flex";
+    resultsCount.innerText = `Found ${filteredResults.length} matches (Threshold: ${Math.round(sliderValue * 100)}%)`;
+    
+    filteredResults.forEach(rec => {
         const card = document.createElement("article");
         card.className = "article-card glass-panel animate-fade-in";
         
@@ -320,5 +368,74 @@ function renderSearchResults(results) {
             });
         }
     });
+}
+
+// Export current search results to CSV
+function exportCurrentResultsToCSV() {
+    if (!currentSearchResults || currentSearchResults.length === 0) return;
+    
+    // Define headers
+    const headers = [
+        "UID",
+        "Date",
+        "Source",
+        "Sender",
+        "Title",
+        "English Summary",
+        "Original Summary",
+        "Detected Language",
+        "Content Type",
+        "Topics",
+        "Themes",
+        "Keywords",
+        "Cosine Similarity Score",
+        "Resolved Entities"
+    ];
+    
+    // Construct CSV lines
+    const csvRows = [headers.join(",")];
+    
+    currentSearchResults.forEach(item => {
+        const row = [
+            item.uid || "",
+            item.datetime || "",
+            item.source || "",
+            item.sender || "",
+            item.title || "",
+            item.summary || "",
+            item.original_language_summary || "",
+            item.detected_language || "",
+            item.content_type || "",
+            (item.topics || []).join(";"),
+            (item.themes || []).join(";"),
+            (item.keywords || []).join(";"),
+            item.similarity !== undefined ? item.similarity.toFixed(4) : "",
+            (item.entities || []).map(e => `${e.name}:${e.type}`).join(";")
+        ];
+        
+        // Escape CSV values
+        const escapedRow = row.map(val => {
+            const strVal = String(val).replace(/"/g, '""');
+            return `"${strVal}"`;
+        });
+        
+        csvRows.push(escapedRow.join(","));
+    });
+    
+    // Create blob and download
+    const csvContent = "\uFEFF" + csvRows.join("\n"); // Add UTF-8 BOM
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    
+    // Form filename with search term and timestamp
+    const query = document.getElementById("search-input").value.trim().replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const timestamp = new Date().toISOString().slice(0, 10);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `narrative_search_${query || "results"}_${timestamp}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 

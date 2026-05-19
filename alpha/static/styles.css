@@ -218,6 +218,61 @@ body {
     gap: 16px;
 }
 
+.search-options {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.sensitivity-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 4px 12px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+}
+
+.slider-input {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 90px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    outline: none;
+    transition: var(--transition);
+}
+
+.slider-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent-color);
+    cursor: pointer;
+    box-shadow: 0 0 6px var(--accent-color);
+    transition: var(--transition);
+}
+
+.slider-input::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    background: var(--primary-color);
+    box-shadow: 0 0 8px var(--primary-color);
+}
+
+.slider-value {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-primary);
+    min-width: 28px;
+    text-align: right;
+}
+
 .search-header h2 {
     font-family: var(--font-heading);
     font-size: 18px;
@@ -318,6 +373,28 @@ body {
     box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
 }
 
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    outline: none;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: var(--transition);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
 /* Main Split View */
 .dashboard-split {
     display: grid;
@@ -342,6 +419,12 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+.results-title-group {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
 }
 
 .results-header h2 {
