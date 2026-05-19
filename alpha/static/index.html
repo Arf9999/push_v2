@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Narrative Intelligence Dashboard</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="glow-bg"></div>
+    
+    <header class="app-header">
+        <div class="header-container">
+            <div class="logo">
+                <i class="fa-solid fa-brain-circuit logo-icon"></i>
+                <div class="logo-text">
+                    <h1>Narrative Intelligence</h1>
+                    <span>Phase 2 Multilingual Pipeline</span>
+                </div>
+            </div>
+            <div class="system-status">
+                <span class="status-indicator"></span>
+                <span class="status-text">Local DuckDB Active</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="dashboard-container">
+        <!-- Stats Section -->
+        <section class="stats-grid">
+            <div class="stat-card glass-panel animate-fade-in" id="stat-total">
+                <div class="stat-icon-wrapper"><i class="fa-solid fa-newspaper"></i></div>
+                <div class="stat-info">
+                    <h3>Total Ingested</h3>
+                    <div class="stat-value" id="val-total">-</div>
+                </div>
+            </div>
+            <div class="stat-card glass-panel animate-fade-in" id="stat-languages">
+                <div class="stat-icon-wrapper"><i class="fa-solid fa-language"></i></div>
+                <div class="stat-info">
+                    <h3>Languages Tracked</h3>
+                    <div class="stat-value" id="val-languages">-</div>
+                </div>
+            </div>
+            <div class="stat-card glass-panel animate-fade-in" id="stat-sources">
+                <div class="stat-icon-wrapper"><i class="fa-solid fa-rss"></i></div>
+                <div class="stat-info">
+                    <h3>Active Sources</h3>
+                    <div class="stat-value" id="val-sources">-</div>
+                </div>
+            </div>
+            <div class="stat-card glass-panel animate-fade-in" id="stat-marketing">
+                <div class="stat-icon-wrapper"><i class="fa-solid fa-filter"></i></div>
+                <div class="stat-info">
+                    <h3>Promo Spams Filtered</h3>
+                    <div class="stat-value" id="val-marketing">-</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Search Control Section -->
+        <section class="search-section glass-panel animate-fade-in">
+            <div class="search-header">
+                <h2>Vector Semantic Search</h2>
+                <div class="vector-space-toggle">
+                    <span class="toggle-label">Search Space:</span>
+                    <button class="btn-toggle active" id="space-english" data-space="english">
+                        <i class="fa-solid fa-flag-usa"></i> English Summaries
+                    </button>
+                    <button class="btn-toggle" id="space-multilingual" data-space="multilingual">
+                        <i class="fa-solid fa-earth-africa"></i> Multilingual Original
+                    </button>
+                </div>
+            </div>
+            <form id="search-form" class="search-form-container">
+                <div class="search-input-wrapper">
+                    <i class="fa-solid fa-magnifying-glass search-bar-icon"></i>
+                    <input type="text" id="search-input" placeholder="Enter keywords, abstract concepts, or semantic ideas (e.g., 'energy security policies in South Africa')" required>
+                </div>
+                <button type="submit" class="btn-primary">
+                    <span>Search</span> <i class="fa-solid fa-arrow-right"></i>
+                </button>
+            </form>
+        </section>
+
+        <!-- Main Display Split -->
+        <div class="dashboard-split">
+            <!-- Left Pane: Results -->
+            <section class="results-pane">
+                <div class="results-header">
+                    <h2>Search Results</h2>
+                    <span class="results-count" id="results-count">Enter a query to begin</span>
+                </div>
+                <div class="results-list" id="results-list">
+                    <!-- Cards will be dynamically inserted here -->
+                    <div class="empty-state">
+                        <i class="fa-solid fa-search-minus empty-icon"></i>
+                        <p>No query executed yet. Search above to find semantically relevant articles.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Pane: Analytics Charts & Entity Lexicon -->
+            <aside class="analytics-pane">
+                <div class="glass-panel analytics-card animate-fade-in">
+                    <h3>Language Distribution</h3>
+                    <div class="chart-container">
+                        <canvas id="languages-chart"></canvas>
+                    </div>
+                </div>
+                <div class="glass-panel analytics-card animate-fade-in">
+                    <h3>Top Entities (Lexicon-Deduplicated)</h3>
+                    <div class="entity-cloud-container" id="entity-cloud">
+                        <p class="loading-placeholder">Loading deduplicated entity cloud...</p>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </main>
+
+    <footer class="app-footer">
+        <p>&copy; 2026 Narrative Intelligence Engine • Running on constrained resources (max 512MB RAM)</p>
+    </footer>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>

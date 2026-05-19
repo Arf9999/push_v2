@@ -1,0 +1,248 @@
+#' Model-Agnostic LLM Completion and Embeddings Adapter
+#'
+#' Unified wrapper for calling chat completion and embedding endpoints
+#' across OpenRouter, Ollama, OpenAI, and Gemini.
+#'
+#' @importFrom httr2 request req_headers req_body_json req_perform resp_body_json req_retry
+#' @importFrom jsonlite fromJSON
+#' @export
+
+#' Generate Chat Completion
+#'
+#' Call chat completion endpoint of the configured provider.
+#'
+#' @param prompt User prompt text.
+#' @param system_prompt Optional system instructions.
+#' @param json_mode Boolean, whether to request JSON response formatting.
+#' @param config Configuration list containing api keys and model settings.
+#' @return A list containing the generated text or parsed JSON.
+generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE, config = NULL) {
+    if (is.null(config)) {
+        stop("Configuration list must be provided.")
+    }
+    
+    provider <- tolower(config$llm_provider)
+    model <- config$llm_model
+    
+    # 1. Build messages structure
+    messages <- list()
+    if (!is.null(system_prompt) && system_prompt != "") {
+        messages[[length(messages) + 1]] <- list(role = "system", content = system_prompt)
+    }
+    messages[[length(messages) + 1]] <- list(role = "user", content = prompt)
+    
+    # 2. Execute call depending on provider
+    if (provider == "openrouter") {
+        if (config$openrouter_api_key == "") {
+            stop("OPENROUTER_API_KEY is not configured.")
+        }
+        
+        req <- httr2::request("https://openrouter.ai/api/v1/chat/completions") %>%
+            httr2::req_headers(
+                "Authorization" = paste("Bearer", config$openrouter_api_key),
+                "HTTP-Referer" = "https://github.com/Arf9999/newsletter_phase2",
+                "X-Title" = "Narrative Intelligence Pipeline"
+            )
+            
+        body <- list(
+            model = model,
+            messages = messages
+        )
+        if (json_mode) {
+            body$response_format <- list(type = "json_object")
+        }
+        
+        req <- req %>% httr2::req_body_json(body) %>% httr2::req_retry(max_tries = 3)
+        resp <- httr2::req_perform(req)
+        res_json <- httr2::resp_body_json(resp)
+        
+        content <- res_json$choices[[1]]$message$content
+        return(content)
+        
+    } else if (provider == "ollama") {
+        url <- paste0(config$ollama_host, "/api/chat")
+        body <- list(
+            model = model,
+            messages = messages,
+            stream = FALSE
+        )
+        if (json_mode) {
+            body$format <- "json"
+        }
+        
+        req <- httr2::request(url) %>%
+            httr2::req_body_json(body) %>%
+            httr2::req_retry(max_tries = 2)
+            
+        resp <- httr2::req_perform(req)
+        res_json <- httr2::resp_body_json(resp)
+        
+        return(res_json$message$content)
+        
+    } else if (provider == "openai") {
+        if (config$openai_api_key == "") {
+            stop("OPENAI_API_KEY is not configured.")
+        }
+        
+        req <- httr2::request("https://api.openai.com/v1/chat/completions") %>%
+            httr2::req_headers("Authorization" = paste("Bearer", config$openai_api_key))
+            
+        body <- list(
+            model = model,
+            messages = messages
+        )
+        if (json_mode) {
+            body$response_format <- list(type = "json_object")
+        }
+        
+        req <- req %>% httr2::req_body_json(body) %>% httr2::req_retry(max_tries = 3)
+        resp <- httr2::req_perform(req)
+        res_json <- httr2::resp_body_json(resp)
+        
+        return(res_json$choices[[1]]$message$content)
+        
+    } else if (provider == "gemini") {
+        if (config$gemini_api_key == "") {
+            stop("GEMINI_API_KEY is not configured.")
+        }
+        
+        url <- paste0("https://generativelanguage.googleapis.com/v1beta/models/", model, ":generateContent?key=", config$gemini_api_key)
+        
+        # Build contents structure for Gemini
+        contents <- list(
+            parts = list(
+                list(text = prompt)
+            )
+        )
+        
+        # System instructions if provided
+        body <- list(contents = list(contents))
+        if (!is.null(system_prompt) && system_prompt != "") {
+            body$systemInstruction <- list(parts = list(list(text = system_prompt)))
+        }
+        if (json_mode) {
+            body$generationConfig <- list(responseMimeType = "application/json")
+        }
+        
+        req <- httr2::request(url) %>%
+            httr2::req_body_json(body) %>%
+            httr2::req_retry(max_tries = 3)
+            
+        resp <- httr2::req_perform(req)
+        res_json <- httr2::resp_body_json(resp)
+        
+        return(res_json$candidates[[1]]$content$parts[[1]]$text)
+        
+    } else {
+        stop("Unknown LLM provider specified: ", provider)
+    }
+}
+
+#' Generate Vector Embeddings
+#'
+#' Generate embeddings for a vector of texts using the configured provider.
+#'
+#' @param texts A character vector of texts to embed.
+#' @param config Configuration list.
+#' @param space Either "english" or "multilingual" to toggle models if needed.
+#' @return A list of numeric vectors containing the embeddings.
+generate_embeddings <- function(texts, config = NULL, space = "english") {
+    if (is.null(config)) {
+        stop("Configuration list must be provided.")
+    }
+    if (length(texts) == 0) {
+        return(list())
+    }
+    
+    provider <- tolower(config$embedding_provider)
+    # Check if we should override model based on vector space target
+    model <- config$embedding_model
+    
+    embeddings <- list()
+    
+    for (txt in texts) {
+        if (txt == "" || is.na(txt)) {
+            embeddings[[length(embeddings) + 1]] <- NA
+            next
+        }
+        
+        if (provider == "openrouter") {
+            # OpenRouter typically doesn't host embeddings natively, so we fall back to OpenAI API format
+            # or custom endpoint. Let's build OpenAI/OpenRouter fallback for embeddings.
+            api_key <- ifelse(config$openrouter_api_key != "", config$openrouter_api_key, config$openai_api_key)
+            if (api_key == "") {
+                stop("Neither OPENROUTER_API_KEY nor OPENAI_API_KEY is configured for embeddings.")
+            }
+            
+            # Use OpenAI embeddings endpoint (which many API hosts share)
+            req <- httr2::request("https://api.openai.com/v1/embeddings") %>%
+                httr2::req_headers("Authorization" = paste("Bearer", api_key)) %>%
+                httr2::req_body_json(list(
+                    model = model,
+                    input = txt
+                )) %>%
+                httr2::req_retry(max_tries = 3)
+                
+            resp <- httr2::req_perform(req)
+            res_json <- httr2::resp_body_json(resp)
+            embeddings[[length(embeddings) + 1]] <- as.numeric(res_json$data[[1]]$embedding)
+            
+        } else if (provider == "openai") {
+            if (config$openai_api_key == "") {
+                stop("OPENAI_API_KEY is not configured.")
+            }
+            
+            req <- httr2::request("https://api.openai.com/v1/embeddings") %>%
+                httr2::req_headers("Authorization" = paste("Bearer", config$openai_api_key)) %>%
+                httr2::req_body_json(list(
+                    model = model,
+                    input = txt
+                )) %>%
+                httr2::req_retry(max_tries = 3)
+                
+            resp <- httr2::req_perform(req)
+            res_json <- httr2::resp_body_json(resp)
+            embeddings[[length(embeddings) + 1]] <- as.numeric(res_json$data[[1]]$embedding)
+            
+        } else if (provider == "ollama") {
+            url <- paste0(config$ollama_host, "/api/embed")
+            req <- httr2::request(url) %>%
+                httr2::req_body_json(list(
+                    model = model,
+                    input = txt
+                )) %>%
+                httr2::req_retry(max_tries = 2)
+                
+            resp <- httr2::req_perform(req)
+            res_json <- httr2::resp_body_json(resp)
+            embeddings[[length(embeddings) + 1]] <- as.numeric(res_json$embeddings[[1]])
+            
+        } else if (provider == "gemini") {
+            if (config$gemini_api_key == "") {
+                stop("GEMINI_API_KEY is not configured.")
+            }
+            
+            # Use developer API embedContent
+            url <- paste0("https://generativelanguage.googleapis.com/v1beta/models/", model, ":embedContent?key=", config$gemini_api_key)
+            
+            req <- httr2::request(url) %>%
+                httr2::req_body_json(list(
+                    content = list(
+                        parts = list(
+                            list(text = txt)
+                        )
+                    )
+                )) %>%
+                httr2::req_retry(max_tries = 3)
+                
+            resp <- httr2::req_perform(req)
+            res_json <- httr2::resp_body_json(resp)
+            embeddings[[length(embeddings) + 1]] <- as.numeric(res_json$embedding$values)
+            
+        } else {
+            stop("Unknown embedding provider specified: ", provider)
+        }
+    }
+    
+    return(embeddings)
+}
