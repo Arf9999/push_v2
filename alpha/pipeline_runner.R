@@ -13,6 +13,7 @@ source("alpha/email_ingester.R")
 source("alpha/rss_ingester.R")
 source("alpha/telegram_ingester.R")
 source("alpha/subscription_ingester.R")
+source("alpha/fediverse_ingester.R")
 source("alpha/entity_resolver.R")
 
 library(jsonlite)
@@ -38,8 +39,9 @@ format_vector_for_duckdb <- function(vec) {
 #' @param rss_feeds Named list of RSS URLs: list(feed_name = "url")
 #' @param telegram_channels Character vector of telegram channel names
 #' @param subscription_feeds Named list of substack/ghost feeds
+#' @param fediverse_handles Character vector of Fediverse/Mastodon handles
 #' @export
-run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscription_feeds = list()) {
+run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscription_feeds = list(), fediverse_handles = c()) {
     message("--- Initializing Pipeline Run ---")
     config <- get_config()
     
@@ -102,6 +104,20 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
                 return(list())
             })
             raw_items <- c(raw_items, sub_recs)
+        }
+    }
+    
+    # E. Fetch Fediverse accounts
+    if (length(fediverse_handles) > 0) {
+        message("\n[Pipeline] Ingesting Fediverse accounts...")
+        for (handle in fediverse_handles) {
+            fedi_recs <- tryCatch({
+                fetch_fediverse_posts(handle)
+            }, error = function(e) {
+                message("Fediverse ingestion failed for handle (", handle, "): ", e$message)
+                return(list())
+            })
+            raw_items <- c(raw_items, fedi_recs)
         }
     }
     
@@ -215,12 +231,12 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
         # Set parameters
         insert_sql <- "
             INSERT INTO newsletters (
-                uid, datetime, source, sender, title, summary,
+                uid, datetime, source, sender, title, url, summary,
                 original_language_summary, detected_language, truncated, content_type,
                 topics, themes, keywords, subscription_marketing,
                 english_embedding, multilingual_embedding
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             );
         "
         
@@ -233,6 +249,7 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
             pub_pub,
             item$sender,
             item$title,
+            item$url,
             parsed_analysis$summary_en,
             parsed_analysis$summary_orig,
             parsed_analysis$detected_language,

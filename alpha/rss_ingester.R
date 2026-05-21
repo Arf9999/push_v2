@@ -122,6 +122,7 @@ fetch_rss_feed <- function(feed_url, feed_name = "RSS Feed") {
             source = feed_name,
             sender = feed_name,
             title = title,
+            url = link,
             body = body
         )
     }

@@ -37,6 +37,7 @@ mock_items <- list(
     sender = "energy-insights@substack.com",
     source = "Energy Insights",
     datetime = "2026-05-18T10:00:00Z",
+    url = "https://energy-insights.substack.com/p/totalenergies-advances-lng-mozambique",
     body = "TotalEnergies is restarting its liquefied natural gas (LNG) project in Cabo Delgado, Mozambique, after security conditions improved. The project is expected to produce 13 million tons of LNG per year. Key organizations involved include TotalEnergies and Eni, with CEO Patrick Pouyanné visiting Maputo to coordinate with President Filipe Nyusi. The local communities in Palma and Mocímboa da Praia will benefit from development programs."
   ),
   list(
@@ -45,6 +46,7 @@ mock_items <- list(
     sender = "contact@cedeao.int",
     source = "CEDEAO News",
     datetime = "2026-05-19T08:30:00Z",
+    url = "https://cedeao.int/news/transition-energetique-afrique-ouest",
     body = "La CEDEAO (Communauté Économique des États de l'Afrique de l'Ouest) a annoncé un nouveau fonds de 500 millions de dollars pour soutenir le développement de projets solaires hors réseau au Sénégal et au Mali. Le commissaire à l'énergie de la CEDEAO, Sékou Sangaré, a précisé que la Banque Ouest Africaine de Développement (BOAD) et la Banque mondiale codirigent l'initiative. Le but est de réduire la dépendance au charbon et de favoriser l'électrification rurale."
   ),
   list(
@@ -53,6 +55,7 @@ mock_items <- list(
     sender = "info@jornaldeangola.ao",
     source = "Jornal de Angola",
     datetime = "2026-05-19T09:15:00Z",
+    url = "https://jornaldeangola.ao/news/angola-avanca-novos-projetos-energia-solar-benguela",
     body = "O governo de Angola, representado pelo Ministério da Energia e Águas, assinou um acordo de financiamento com a empresa alemã GAUFF Engineering para construir três centrais solares fotovoltaicas na província de Benguela. O ministro João Baptista Borges destacou que a infraestrutura beneficiará mais de 200 mil famílias e ajudará o país a diversificar a sua matriz energética nacional, reduzindo o consumo de gasóleo."
   )
 )
@@ -107,12 +110,12 @@ for (item in mock_items) {
   
   insert_sql <- "
       INSERT INTO newsletters (
-          uid, datetime, source, sender, title, summary,
+          uid, datetime, source, sender, title, url, summary,
           original_language_summary, detected_language, truncated, content_type,
           topics, themes, keywords, subscription_marketing,
           english_embedding, multilingual_embedding
       ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       );
   "
   
@@ -122,6 +125,7 @@ for (item in mock_items) {
     pub_pub,
     item$sender,
     item$title,
+    item$url,
     parsed_analysis$summary_en,
     parsed_analysis$summary_orig,
     parsed_analysis$detected_language,
@@ -148,6 +152,8 @@ for (item in mock_items) {
 
 # Verify entries
 message("\n=== Database Verification ===")
+print(DBI::dbGetQuery(con, "SELECT title, url FROM newsletters;"))
+
 newsletters_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM newsletters;")$count
 entities_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM entities;")$count
 lexicon_count <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM entity_lexicon;")$count

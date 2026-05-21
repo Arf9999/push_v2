@@ -31,6 +31,9 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
     }
     messages[[length(messages) + 1]] <- list(role = "user", content = prompt)
     
+    content <- NULL
+    reasoning <- NULL
+    
     # 2. Execute call depending on provider
     if (provider == "openrouter") {
         if (config$openrouter_api_key == "") {
@@ -57,7 +60,10 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
         res_json <- httr2::resp_body_json(resp)
         
         content <- res_json$choices[[1]]$message$content
-        return(content)
+        reasoning <- res_json$choices[[1]]$message$reasoning_content
+        if (is.null(reasoning)) {
+            reasoning <- res_json$choices[[1]]$message$reasoning
+        }
         
     } else if (provider == "ollama") {
         url <- paste0(config$ollama_host, "/api/chat")
@@ -77,7 +83,7 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
         resp <- httr2::req_perform(req)
         res_json <- httr2::resp_body_json(resp)
         
-        return(res_json$message$content)
+        content <- res_json$message$content
         
     } else if (provider == "openai") {
         if (config$openai_api_key == "") {
@@ -99,7 +105,8 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
         resp <- httr2::req_perform(req)
         res_json <- httr2::resp_body_json(resp)
         
-        return(res_json$choices[[1]]$message$content)
+        content <- res_json$choices[[1]]$message$content
+        reasoning <- res_json$choices[[1]]$message$reasoning_content
         
     } else if (provider == "gemini") {
         if (config$gemini_api_key == "") {
@@ -131,11 +138,35 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
         resp <- httr2::req_perform(req)
         res_json <- httr2::resp_body_json(resp)
         
-        return(res_json$candidates[[1]]$content$parts[[1]]$text)
+        content <- res_json$candidates[[1]]$content$parts[[1]]$text
+        
+        # Gemini thought extraction if reasoning model and parts contain thought field
+        parts <- res_json$candidates[[1]]$content$parts
+        if (length(parts) > 1) {
+            for (i in seq_along(parts)) {
+                if (!is.null(parts[[i]]$thought)) {
+                    reasoning <- parts[[i]]$text
+                    break
+                }
+            }
+        }
         
     } else {
         stop("Unknown LLM provider specified: ", provider)
     }
+    
+    # 3. Log to Forensic Log
+    log_forensic_response(
+        provider = provider,
+        model = model,
+        prompt = prompt,
+        system_prompt = system_prompt,
+        response_text = content,
+        reasoning_content = reasoning,
+        config = config
+    )
+    
+    return(content)
 }
 
 #' Generate Vector Embeddings
@@ -245,4 +276,70 @@ generate_embeddings <- function(texts, config = NULL, space = "english") {
     }
     
     return(embeddings)
+}
+
+#' Log LLM response activity to a Forensic Log file
+#'
+#' Appends raw system prompts, user prompts, generated completions, and model thinking processes to a configured path.
+#'
+#' @param provider The backend provider name.
+#' @param model The active model name.
+#' @param prompt User prompt text.
+#' @param system_prompt System prompt instructions.
+#' @param response_text Final answer text.
+#' @param reasoning_content Optional model reasoning/thinking process text.
+#' @param config Config list.
+log_forensic_response <- function(provider, model, prompt, system_prompt, response_text, reasoning_content = NULL, config = NULL) {
+    log_path <- if (!is.null(config) && !is.null(config$forensic_log_path) && config$forensic_log_path != "") {
+        config$forensic_log_path
+    } else {
+        "FORENSIC_LOG"
+    }
+    
+    # Ensure parent directory exists if log is placed inside a folder path
+    dir_name <- dirname(log_path)
+    if (dir_name != "." && dir_name != "" && !dir.exists(dir_name)) {
+        dir.create(dir_name, recursive = TRUE, showWarnings = FALSE)
+    }
+    
+    timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    
+    system_prompt_str <- if (!is.null(system_prompt) && system_prompt != "") {
+        paste0("SYSTEM PROMPT:\n", system_prompt, "\n")
+    } else {
+        ""
+    }
+    
+    log_entry <- paste0(
+        "================================================================================\n",
+        "TIMESTAMP: ", timestamp, "\n",
+        "PROVIDER:  ", provider, "\n",
+        "MODEL:     ", model, "\n",
+        system_prompt_str,
+        "------------------------------------ PROMPT ------------------------------------\n",
+        prompt, "\n",
+        "---------------------------------- RESPONSE ------------------------------------\n"
+    )
+    
+    if (!is.null(reasoning_content) && reasoning_content != "") {
+        log_entry <- paste0(
+            log_entry,
+            "--- THINKING PROCESS ---\n",
+            reasoning_content, "\n",
+            "--- FINAL ANSWER ---\n"
+        )
+    }
+    
+    log_entry <- paste0(
+        log_entry,
+        response_text, "\n",
+        "================================================================================\n\n"
+    )
+    
+    # Append to the log file
+    tryCatch({
+        cat(log_entry, file = log_path, append = TRUE)
+    }, error = function(e) {
+        warning("Failed to write to FORENSIC_LOG: ", e$message)
+    })
 }

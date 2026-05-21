@@ -113,6 +113,7 @@ process_email_record <- function(email_text, uid) {
         source = "Email Intake",
         sender = sender_email,
         title = subj_field,
+        url = NA_character_,
         body = body
     )
 }

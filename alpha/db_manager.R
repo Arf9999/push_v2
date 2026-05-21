@@ -36,6 +36,7 @@ init_db <- function(con) {
             source VARCHAR,
             sender VARCHAR,
             title VARCHAR,
+            url VARCHAR,
             summary TEXT,
             original_language_summary TEXT,
             detected_language VARCHAR,
@@ -50,6 +51,13 @@ init_db <- function(con) {
             ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     ")
+    
+    # Schema migration check: Ensure 'url' column exists in existing databases
+    cols <- DBI::dbGetQuery(con, "PRAGMA table_info('newsletters');")
+    if (!("url" %in% cols$name)) {
+        message("Migration: Adding 'url' column to existing newsletters table.")
+        DBI::dbExecute(con, "ALTER TABLE newsletters ADD COLUMN url VARCHAR;")
+    }
     
     # 2. Create entity ID sequence and entities table
     DBI::dbExecute(con, "CREATE SEQUENCE IF NOT EXISTS entity_id_seq;")

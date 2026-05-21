@@ -86,6 +86,7 @@ fetch_telegram_channel <- function(channel_name) {
             source = paste0("Telegram: @", channel_name),
             sender = channel_name,
             title = paste0("Telegram Post - @", channel_name),
+            url = msg_link,
             body = text
         )
     }

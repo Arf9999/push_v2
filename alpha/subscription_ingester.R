@@ -78,6 +78,7 @@ scrape_subscription_article <- function(url, publisher_name = "Subscription Publ
         source = publisher_name,
         sender = publisher_name,
         title = title,
+        url = url,
         body = body
     ))
 }
@@ -162,6 +163,7 @@ fetch_subscription_feed <- function(feed_url, publisher_name = "Subscription Pub
             source = publisher_name,
             sender = publisher_name,
             title = title,
+            url = link,
             body = body
         )
     }

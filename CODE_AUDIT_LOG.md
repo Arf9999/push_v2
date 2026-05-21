@@ -72,3 +72,65 @@ All changes to core R/Python scripts and LLM prompts are logged here.
 ### Added Interactive Sensitivity Slider and Client-Side CSV Export
 - **Files**: `alpha/static/index.html`, `alpha/static/styles.css`, `alpha/static/dashboard.js`
 - **Strategic Intent**: Empower dashboard users to dynamically adjust vector search sensitivity (cosine similarity score thresholds) client-side in real-time. Implement dynamic CSV results export complete with entity resolution mappings, summaries, and match scores.
+
+### Implemented User Personalization, Search History, Saved Searches, and In-App Notifications
+- **Files**: `alpha/app.py`, `alpha/static/index.html`, `alpha/static/styles.css`, `alpha/static/dashboard.js`, `scratch/test_auth_notifications.py`
+- **Strategic Intent**: Deliver full-featured dashboard personalization and alerts. Implemented standard library password-hashed auth gating, SQLite session database tracking user profiles, saved query parameters, and search history. Wired a client-side Workspace containing Recent and Saved searches, an unread notification bell dropdown, automatic Authorization bearer header injection, active search state auto-triggering on history clicks, and a manual "Run Daily Check" trigger mimicking the cron ingestion script. Verified end-to-end integration via mock tests.
+
+## 2026-05-20
+
+### Implemented Forensic LLM Response Logging
+- **Files**: `alpha/config.R`, `alpha/model_adapter.R`
+- **Strategic Intent**: Meet the governance and audit requirements for persistent logging of LLM requests. Logs the active provider, model, system instructions, user prompts, thinking/reasoning outputs (where available), and final completions to the forensic log file (`FORENSIC_LOG`). Allows customization of the log file path via the `FORENSIC_LOG_PATH` environment variable.
+
+### Created Regional Media Ingestion Survey Application
+- **Files**: `alpha_survey/app.py`, `alpha_survey/static/index.html`, `alpha_survey/static/styles.css`, `alpha_survey/static/app.js`, `scratch/test_survey_api.py`
+- **Strategic Intent**: Deliver an audit-compliant, self-contained media discovery survey workspace. Includes SQLite database schema tracking active and soft-deleted sources, automated ID serialization (`{Country}_{Platform}_{Topic}_{Num}`), robust text-based activity log files, a user attribution field (`input_by`) cached locally via the browser, and coordinator authorization passcode gating (`admin123` via `X-Admin-Token` headers) for administrative operations (delete, restore, verify, CSV export). Verified and compiled utilizing built-in test suites.
+
+### Implemented Auditor Allocation and User Access Control
+- **Files**: `alpha_survey/app.py`, `alpha_survey/static/index.html`, `alpha_survey/static/app.js`, `scratch/test_survey_api.py`
+- **Strategic Intent**: Establish a coordinator-driven auditor management pipeline. Added database seeding for initial auditor accounts, designed secure admin user management endpoints (`GET`, `POST`, `DELETE` under `/api/admin/users`) protected by admin passcode validation, integrated a dynamic user allocation modal in the coordinator panel, and updated the client-side login screen to be strictly credentials-based. Updated integration test suite to verify all auth, login, allocation, and revocation paths.
+
+### Corrected Admin Mode Toggle Layout Stretching
+- **Files**: `alpha_survey/static/index.html`
+- **Strategic Intent**: Restructured the toggle switch markup to align with designed `.toggle-container` and `.switch` relative classes in `styles.css`. This prevents the absolute-positioned `.slider` element from stretching across the entire width of the page container.
+
+### Implemented Auditor-Scoped Views and Administrative Filter
+- **Files**: `alpha_survey/app.py`, `alpha_survey/static/index.html`, `alpha_survey/static/app.js`
+- **Strategic Intent**: Limit default user visibility to only their own inputs to ensure data privacy and scoping. Modified the FastAPI `/api/sources` and `/api/stats` endpoints to accept optional `input_by` query parameters. Modified the frontend to automatically filter tables and platform/country breakdowns by the logged-in user. Added a dropdown select in the Admin panel allowing coordinators to filter the full dataset by any active auditor or view all users' combined stats, directory, and CSV exports. Seeded default testing account `andrew` / `1234`.
+
+## 2026-05-21
+
+### Expanded Ingestion Source Taxonomy Classifications
+- **Files**: `alpha_survey/app.py`, `alpha_survey/static/index.html`
+- **Strategic Intent**: Expand the publisher classification types and thematic topics to cover missing segments and handle unclassifiable sources. Added new validation schemas for consumer news, culture/music/art, gossip/celebrity, newsfluencers, mainstream publications, sports, technology/science, PR/News agency, and other, making sure backend validator and frontend dropdown selects remain in sync.
+
+### Added Admin Activity Log Download Button
+- **Files**: `alpha_survey/app.py`, `alpha_survey/static/index.html`, `alpha_survey/static/app.js`, `scratch/test_survey_api.py`
+- **Strategic Intent**: Provide administrative coordinators with direct access to download the backend activity log file (`survey_activity.log`) from the admin panel interface. Added a secured endpoint `/api/admin/logs` gated by admin passcode, added a matching "Download Activity Log" button visible only in admin mode, wired the frontend download trigger, and expanded integration tests to verify successful file retrieval.
+
+### Configured Environment-Aware Storage & Cloud Run Native GCS Volume Mount Support
+- **Files**: `alpha_survey/app.py`, `alpha_survey/HANDOFF.md`, `alpha_survey/requirements.txt`, `alpha_survey/Dockerfile`
+- **Strategic Intent**: Hardened application portability by making SQLite database and log file paths configurable via environment variables (`SURVEY_DB_PATH` and `SURVEY_LOG_DIR`). Created deployment scaffolding (`Dockerfile`, `requirements.txt`) and documented step-by-step instructions for native Google Cloud Run GCS volume mounts in `HANDOFF.md` to support stateless, persistent container scaling.
+
+### Implemented Fediverse Ingestion Platform Type
+- **Files**: `alpha_survey/app.py`, `alpha_survey/static/index.html`, `alpha_survey/static/app.js`, `alpha_survey/static/styles.css`, `alpha_survey/HANDOFF.md`, `scratch/test_survey_api.py`
+- **Strategic Intent**: Add support for logging Fediverse links (e.g. Mastodon profile/channel URLs) to the regional survey tool. Updated the backend Pydantic validators, ID serial generation prefix maps (added `FED` mapping code), and stats aggregation logic. Updated the frontend UI platform select dropdowns, platform filters, badge colors (using new `.badge-orange` style rule), and placeholder info descriptions. Added a new verification test case validating that Fediverse records ingest correctly, auto-generate matching IDs, and are counted properly in stats.
+
+
+### Implemented Fediverse Ingestion Module and Pipeline Integration
+- **Files**: `alpha/fediverse_ingester.R`, `alpha/pipeline_runner.R`, `scratch/test_fediverse.R`
+- **Strategic Intent**: Add capability to ingest public posts from Fediverse/Mastodon handles (e.g. `@username@domain`) into the Narrative Intelligence pipeline. Features public RSS feed resolving with primary/fallback URLs, HTML stripping, stable MD5 hash UIDs, and integration in `pipeline_runner.R`. Verified via `scratch/test_fediverse.R`.
+
+### Implemented Target URL Capture Across Pipeline
+- **Files**: `alpha/db_manager.R`, `alpha/pipeline_runner.R`, `alpha/rss_ingester.R`, `alpha/fediverse_ingester.R`, `alpha/subscription_ingester.R`, `alpha/telegram_ingester.R`, `alpha/email_ingester.R`, `scratch/run_integration_test.R`, `scratch/test_fediverse.R`
+- **Strategic Intent**: Add a `url` column to the `newsletters` DuckDB table schema with automatic `ALTER TABLE` migrations for backward compatibility. Update all ingestion modules (Gmail, RSS, Telegram, Substack/Ghost, and Fediverse) to capture and propagate original source/article URLs. Integrate URL bindings in database insertion queries of the pipeline runner and verify with mock/live integration tests.
+
+### Implemented External Link Detection and Scraping for Fediverse Posts
+- **Files**: `alpha/fediverse_ingester.R`, `scratch/test_fediverse.R`
+- **Strategic Intent**: Add capability to detect, filter, and scrape external target URLs shared inside Fediverse/Mastodon posts. Uses structural path filtering in `is_actual_article_link` to ignore Fediverse profiles, statuses, hashtags, and media attachments. Reuses `httr2` and `rvest` to fetch and extract full webpage text, appending it to the record's body and setting the target `url` column to the external link for improved LLM summarization and entity extraction. Verified via mock and live tests.
+
+
+
+
+

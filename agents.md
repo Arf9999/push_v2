@@ -9,7 +9,8 @@
 - **Anti-Patch Pipeline Hardening**: Code corrections must address the systemic cause of an issue rather than being symptomatic patches targeting a single symptom or specific run artifact. Every code change must focus exclusively on the robustness, portability, and long-term replicability of the pipeline. Ad-hoc symptomatic patches to output files, intermediate data, or cosmetic overrides are strictly prohibited as they break downstream pipeline integrity.
 - **Strict Typing**: All R code must use S3 classes where applicable; all SQL must be BigQuery standard.
 - **Forensic Code Audit Log**: Every change to core R/Python scripts or LLM prompts must be logged in `CODE_AUDIT_LOG.md` specifying the strategic intent.
-- **Governance Compliance**: All pipeline modifications must strictly adhere to the [GOVERNANCE_PROTOCOL.md](file:///Volumes/Lexar%20R/R_projects_local/narrative_intelligence_engine/GOVERNANCE_PROTOCOL.md) regarding strategic portability and resilience.
+- **Forensic LLM Response Logging**: A `FORENSIC_LOG` of LLM script responses must be saved. For thinking processes, this should document the process.
+- **Governance Compliance**: All pipeline modifications must strictly adhere to the [GOVERNANCE_PROTOCOL.md](/Users/arf/R_projects_local/newsletter_phase2/GOVERNANCE_PROTOCOL.md) regarding strategic portability and resilience.
 - **R-Native RDS Operational Mandate**: Using `.rds` as the primary file format for all inter-script data communication ensures that all R dataframe and variable types remain perfectly consistent. By saving as CSV and then ingesting them, there is a high risk that variables are not typed correctly or contents are truncated. Flat CSV files are strictly reserved as export/backup formats, never as the source of truth for downstream pipeline steps.
 
 

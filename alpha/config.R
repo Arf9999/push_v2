@@ -31,6 +31,9 @@ get_config <- function() {
     # State tracking configuration
     last_email_id_file <- Sys.getenv("LAST_EMAIL_ID_FILE", unset = "alpha/last_email_id.txt")
     
+    # Forensic Logging configuration
+    forensic_log_path <- Sys.getenv("FORENSIC_LOG_PATH", unset = "FORENSIC_LOG")
+    
     config <- list(
         gmail_username = gmail_username,
         gmail_app_password = gmail_app_password,
@@ -44,7 +47,8 @@ get_config <- function() {
         openai_api_key = openai_api_key,
         gemini_api_key = gemini_api_key,
         gcs_bucket_name = gcs_bucket_name,
-        last_email_id_file = last_email_id_file
+        last_email_id_file = last_email_id_file,
+        forensic_log_path = forensic_log_path
     )
     
     return(config)
