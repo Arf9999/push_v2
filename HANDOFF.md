@@ -6,16 +6,17 @@ Welcome to the **newsletter_v2** project workspace. This document serves as the 
 
 ## 1. Directory Structure
 
-All active development modules, sandbox components, and web assets reside under the user-audited sandbox root `alpha/` to avoid contamination of legacy scripts:
+All active development modules, sandbox components, and web assets reside in the project workspace as follows:
 
 ```
 /
-├── alpha/                             # Alpha Sandbox Root
+├── alpha/                             # Alpha Sandbox Root (Search Dashboard & Pipeline)
 │   ├── static/                        # Frontend UI Dashboard
 │   │   ├── index.html                 # Glassmorphic HTML5 dashboard
 │   │   ├── styles.css                 # Custom CSS variables, transitions & layout
 │   │   └── dashboard.js               # Client-side search, slider, auth, history & notifications
 │   ├── app.py                         # FastAPI Backend Daemon (Python)
+│   ├── config.R                       # Environment configurations parser
 │   ├── db_manager.R                   # DuckDB database initialization & connection
 │   ├── email_ingester.R               # Secure Gmail IMAP retriever (via mRpostman)
 │   ├── rss_ingester.R                 # RSS XML feed ingestion engine
@@ -27,13 +28,34 @@ All active development modules, sandbox components, and web assets reside under 
 │   ├── evaluate_nuance.R              # LLM-as-a-judge translation evaluation suite
 │   ├── prompts.R                      # Language-agnostic extraction templates
 │   ├── pipeline_runner.R              # Core orchestration runner
+│   ├── newsletters.db                 # DuckDB narrative corpus database (created on run)
 │   └── users.db                       # SQLite personalization storage (auto-created)
+├── alpha_survey/                      # Regional Media Ingestion Survey Application Sandbox
+│   ├── static/                        # Frontend Single Page App (SPA) assets
+│   │   ├── index.html                 # Glassmorphic dashboard UI with stats & controls
+│   │   ├── styles.css                 # Clean dark mode layout and micro-animations
+│   │   └── app.js                     # DOM handler, API caller, and session auth manager
+│   ├── app.py                         # FastAPI Backend REST API containing database & logic layers
+│   ├── sources.db                     # Local SQLite database containing logged records & credentials
+│   ├── Dockerfile                     # Containerization setup for Cloud Run
+│   ├── requirements.txt               # Python package dependencies
+│   └── HANDOFF.md                     # Specific survey app technical handoff guide
+├── rollout_plan/                      # [GITIGNORED] 6-Month Project Rollout Plan (May 15 - Oct 31, 2026)
+│   ├── rollout_plan.md                # Rollout schedule, roadmap phases, and risk mitigations
+│   ├── rollout_gantt.csv              # Editable CSV schedule for Google Sheets import
+│   └── gantt_chart.png                # Generated visual Gantt chart representation
 ├── scratch/                           # Agent Temporary Utility Sandbox
 │   ├── run_integration_test.R         # End-to-end local validation script
 │   ├── test_auth_notifications.py     # Auth & notifications integration tests
-│   └── test_fediverse.R               # Fediverse RSS and webpage scraper tests
+│   ├── test_fediverse.R               # Fediverse RSS and webpage scraper tests
+│   └── test_survey_api.py             # Survey application API verification tests
+├── renv/                              # renv project library config
+├── renv.lock                          # Locked R package dependencies
 ├── CODE_AUDIT_LOG.md                  # Forensic script modification audit trail
-└── GOVERNANCE_PROTOCOL.md             # Pipeline resilience and portability guidelines
+├── GOVERNANCE_PROTOCOL.md             # Pipeline resilience and portability guidelines
+├── METHODOLOGY.md                     # Algorithms, mathematical models, and architectures
+├── README.md                          # Main project quick-start and outline
+└── agents.md                          # Sandbox rules and directory isolation requirements
 ```
 
 ---
@@ -182,11 +204,16 @@ Phase 2 introduces two new ingestion components:
 1. **Fediverse/Mastodon RSS Ingestion** ([fediverse_ingester.R](file:///Users/arf/R_projects_local/newsletter_phase2/alpha/fediverse_ingester.R)): Resolves handles (e.g. `@user@domain`) and parses RSS posts. Appends scraped text if an external target article is shared.
 2. **Unified URL Capture**: A `url` column has been appended to the DuckDB schema. All ingesters capture the primary URL path (RSS article link, Telegram post deep link, or scraped external URL) to propagate it down the pipeline.
 
+### Source Ingestion Link Provisioning
+The RSS, Telegram, and Fediverse ingestion modules obtain their feed target links/handles from two tiers:
+* **Development/Local Pilot**: Hardcoded arrays or program arguments are passed inside the test configurations and [pipeline_runner.R](file:///Users/arf/R_projects_local/newsletter_phase2/alpha/pipeline_runner.R).
+* **Production Pipeline**: Links/handles are dynamically pulled from the SQLite database ([sources.db](file:///Users/arf/R_projects_local/newsletter_phase2/alpha_survey/sources.db)) managed by the **Regional Media Ingestion Survey Application**. This enables research auditors to log and verify incoming links through a clean interface before they are consumed by the automated daily ingestion cron.
+
 ---
 
 ## 7. Deployment & Execution Commands
 
-### To start the FastAPI Backend Daemon:
+### To start the FastAPI Backend Daemon (Personalized Search & Notifications):
 ```bash
 # Setup environment variables in .env, then run uvicorn
 export USERS_DB_PATH=alpha/users.db
@@ -197,10 +224,25 @@ source .venv/bin/activate
 uvicorn alpha.app:app --host 127.0.0.1 --port 8000
 ```
 
+### To start the Regional Media Ingestion Survey Application:
+```bash
+# Navigate to workspace root, ensure .venv is active
+source .venv/bin/activate
+export SURVEY_DB_PATH=alpha_survey/sources.db
+export SURVEY_LOG_DIR=alpha_survey/logs
+uvicorn alpha_survey.app:app --host 127.0.0.1 --port 8080 --reload
+```
+
 ### To run the Python Authentication & Notifications test suite:
 ```bash
 # Run integration unit tests against active backend/SQLite
 python scratch/test_auth_notifications.py
+```
+
+### To run the Survey Application API verification tests:
+```bash
+# Run FastAPI, database, and permissions test suite
+python scratch/test_survey_api.py
 ```
 
 ### To run the Fediverse RSS Ingestion test suite:
@@ -223,7 +265,43 @@ Rscript alpha/evaluate_nuance.R
 
 ---
 
-## 8. Linear Management
+## 8. Regional Media Ingestion Survey Application
+
+The workspace features a self-contained survey dashboard under [alpha_survey/](file:///Users/arf/R_projects_local/newsletter_phase2/alpha_survey) designed for identifying and logging new media source feeds (Telegram public channels, RSS feeds, Fediverse profile URLs) to feed into the main ingestion pipeline.
+
+### Core Security & Scoping
+* **Auditor-Scoped Filtering**: Authenticated research assistants (Auditors) only see and manage their own logged entries to maintain privacy and focus.
+* **Passcode-Gated Admin Mode**: Unlocked via passcode `admin123` (configured via header `X-Admin-Token`), allowing coordinator-level operations such as deleting, restoring, verifying logs, allocating/revoking auditor accounts, and downloading the full audit log.
+* **Audit-Compliant Activity Logger**: Every CRUD operation and administrative action (like bulk CSV export or user creation) is logged with date, user, and action type to [survey_activity.log](file:///Users/arf/R_projects_local/newsletter_phase2/alpha_survey/logs/survey_activity.log).
+
+For full database schema, endpoint reference, local deployment commands, and step-by-step Google Cloud Run + GCS volume mount guidelines, refer to the dedicated [alpha_survey/HANDOFF.md](file:///Users/arf/R_projects_local/newsletter_phase2/alpha_survey/HANDOFF.md) file.
+
+---
+
+## 9. Project Rollout Plan (May 15 – October 31, 2026)
+
+A structured 6-month timeline has been established to scale the platform from its Alpha sandbox stage into a production-grade system. All planning assets are stored in the gitignored [rollout_plan/](file:///Users/arf/R_projects_local/newsletter_phase2/rollout_plan) directory.
+
+### Roadmap Phases
+1. **Phase 1: Local Pilot, Validation & Setup** (May 15 – July 3, 2026 / 50 days)
+   * Focuses on virtual environments lock-in, source seeding, local pipeline testing, and dual-embedding vector validation.
+2. **Phase 2: Cloud Provisioning & Service Hosting** (July 4 – August 2, 2026 / 30 days)
+   * Focuses on Docker containerization, Google Cloud Run deployment, and mounting Google Cloud Storage (GCS) volumes to persist SQLite and DuckDB data.
+3. **Phase 3: Regional Ingestion & Personalization** (August 3 – September 2, 2026 / 31 days)
+   * Focuses on auditor account allocation, user-scoped dashboard views, saved searches, and the daily notification cron scheduler.
+4. **Phase 4: Nuance Evaluation & QA** (September 3 – October 2, 2026 / 30 days)
+   * Focuses on running the translation judge suite ([evaluate_nuance.R](file:///Users/arf/R_projects_local/newsletter_phase2/alpha/evaluate_nuance.R)), tuning Jaro-Winkler entity resolver thresholds, and CPU/memory profiling.
+5. **Phase 5: Production Launch & Operations** (October 3 – October 31, 2026 / 29 days)
+   * Focuses on scale intake (100+ channels), VM execution crons (e.g. G2 Spot Instances), logs audits, and final administrative handover.
+
+### Planning Files
+* **Strategic Details & Risk Matrix**: [rollout_plan.md](file:///Users/arf/R_projects_local/newsletter_phase2/rollout_plan/rollout_plan.md)
+* **Importable Spreadsheet Schedule**: [rollout_gantt.csv](file:///Users/arf/R_projects_local/newsletter_phase2/rollout_plan/rollout_gantt.csv) (compatible with Google Sheets)
+* **Visual Gantt Timeline**: [gantt_chart.png](file:///Users/arf/R_projects_local/newsletter_phase2/rollout_plan/gantt_chart.png)
+
+---
+
+## 10. Linear Management
 * **Project Name**: `newsletter_v2`
 * **Status**: **In Progress** (started)
 * **Completed Issues**: `NAR-16` through `NAR-23` updated to **Done**.

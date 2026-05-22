@@ -10,3 +10,5 @@ scratch/newsletter_capture_temp/
 scratch/retool_search_temp/
 __pycache__/
 *.pyc
+rollout_plan/
+

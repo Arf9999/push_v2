@@ -130,6 +130,16 @@ All changes to core R/Python scripts and LLM prompts are logged here.
 - **Files**: `alpha/fediverse_ingester.R`, `scratch/test_fediverse.R`
 - **Strategic Intent**: Add capability to detect, filter, and scrape external target URLs shared inside Fediverse/Mastodon posts. Uses structural path filtering in `is_actual_article_link` to ignore Fediverse profiles, statuses, hashtags, and media attachments. Reuses `httr2` and `rvest` to fetch and extract full webpage text, appending it to the record's body and setting the target `url` column to the external link for improved LLM summarization and entity extraction. Verified via mock and live tests.
 
+## 2026-05-22
+
+### Adjusted Project Rollout Schedule and Timeline Dates
+- **Files**: `rollout_plan/rollout_plan.md`, `rollout_plan/rollout_gantt.csv`, `rollout_plan/gantt_chart.png`
+- **Strategic Intent**: Align the 6-month project rollout schedule to run precisely from May 15, 2026 to October 31, 2026. Adjusted all phase breakdowns, durations, and Gantt charts to conform to this specific timeline.
+
+### Updated Technical Handoff Documentation
+- **Files**: `HANDOFF.md`
+- **Strategic Intent**: Document the newly integrated Regional Ingestion Survey Application and 6-Month Project Rollout Plan in the central workspace handoff guide. Updated the project directory structure, listed operational setup commands for the survey tool, described the scoped data flows, and aligned roadmap details to aid smooth handover and replication.
+
 
 
 
