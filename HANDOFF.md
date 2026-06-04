@@ -233,6 +233,12 @@ export SURVEY_LOG_DIR=alpha_survey/logs
 uvicorn alpha_survey.app:app --host 127.0.0.1 --port 8080 --reload
 ```
 
+### To run the Pipeline Configuration & Database Initialization diagnostics:
+```bash
+# Verify environment settings and connection setup
+Rscript scratch/test_db_and_config.R
+```
+
 ### To run the Python Authentication & Notifications test suite:
 ```bash
 # Run integration unit tests against active backend/SQLite
