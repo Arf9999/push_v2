@@ -20,8 +20,8 @@ tryCatch({
     init_db(con)
     
     # Check max memory and threads setting
-    mem_res <- DBI::dbGetQuery(con, "PRAGMA max_memory;")
-    thread_res <- DBI::dbGetQuery(con, "PRAGMA threads;")
+    mem_res <- DBI::dbGetQuery(con, "SELECT current_setting('max_memory') AS max_memory;")
+    thread_res <- DBI::dbGetQuery(con, "SELECT current_setting('threads') AS threads;")
     
     message("Database Memory Limit: ", mem_res$max_memory)
     message("Database Active Threads: ", thread_res$threads)

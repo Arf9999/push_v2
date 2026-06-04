@@ -304,5 +304,14 @@ A structured 6-month timeline has been established to scale the platform from it
 ## 10. Linear Management
 * **Project Name**: `newsletter_v2`
 * **Status**: **In Progress** (started)
-* **Completed Issues**: `NAR-16` through `NAR-23` updated to **Done**.
-* **Legacy Issues**: `NAR-1` through `NAR-15` updated to **Canceled**.
+* **Development Issues**: `NAR-16` through `NAR-23` are **Done**; `NAR-24` is **In Review**.
+* **Legacy Issues**: `NAR-1` through `NAR-15` are **Canceled**.
+* **Rollout Schedule Issues**: `NAR-25` through `NAR-40` track the 16 tasks of the 6-month rollout plan (May 15 – October 31, 2026) with sequential dependencies (`blockedBy`).
+  * **Milestones (Rollout Phases)**:
+    1. `Phase 1: Local Pilot` (Target: 2026-07-03) — Tasks: `NAR-25` to `NAR-28`
+    2. `Phase 2: Cloud Ingestion` (Target: 2026-08-02) — Tasks: `NAR-29` to `NAR-31`
+    3. `Phase 3: Regional Ingest` (Target: 2026-09-02) — Tasks: `NAR-32` to `NAR-34`
+    4. `Phase 4: QA & Evaluation` (Target: 2026-10-02) — Tasks: `NAR-35` to `NAR-37`
+    5. `Phase 5: Production Launch` (Target: 2026-10-31) — Tasks: `NAR-38` to `NAR-40`
+  * **Task Statuses**: `NAR-25` is set to **In Progress** (active May 15 – May 25, 2026), and `NAR-26` through `NAR-40` are in **Todo** state.
+
