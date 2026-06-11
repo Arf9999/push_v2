@@ -42,12 +42,42 @@ format_vector_for_duckdb <- function(vec) {
 #' @param fediverse_handles Character vector of Fediverse/Mastodon handles
 #' @export
 run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscription_feeds = list(), fediverse_handles = c()) {
-    message("--- Initializing Pipeline Run ---")
+    message("--- Initializing Pipeline Run (Blue-Green Swap) ---")
     config <- get_config()
     
-    # 1. Establish DB Connection
-    con <- get_db_connection(config$db_path)
-    on.exit(close_db_connection(con))
+    db_path <- config$db_path
+    temp_db_path <- paste0(db_path, ".temp")
+    pipeline_success <- FALSE
+    
+    # 1. Copy active DB to temp DB if active DB exists
+    if (file.exists(db_path)) {
+        message("[Pipeline] Copying active DB to temporary workspace...")
+        file.copy(from = db_path, to = temp_db_path, overwrite = TRUE)
+    }
+    
+    # 2. Establish DB Connection to the temp database
+    con <- get_db_connection(temp_db_path)
+    
+    # On exit: ensure connection is closed, and swap temp DB to active DB if completed successfully
+    on.exit({
+        close_db_connection(con)
+        if (file.exists(temp_db_path)) {
+            if (pipeline_success) {
+                message("\n[Pipeline] Swapping temporary database to active production database...")
+                # Atomic rename (overwrites active DB)
+                success <- file.rename(from = temp_db_path, to = db_path)
+                if (success) {
+                    message("[Pipeline] Database swap successful. Active DB updated.")
+                } else {
+                    message("Error: Database swap failed.")
+                }
+            } else {
+                message("\n[Pipeline] Pipeline did not complete successfully. Discarding temporary database.")
+                file.remove(temp_db_path)
+            }
+        }
+    })
+    
     init_db(con)
     
     # 2. Ingest raw items from sources
@@ -322,4 +352,7 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
         # Note: Handled by system gsutil/aws sync command or Python sync subagent
         # We'll print instructions for the FastAPI startup replication.
     }
+    
+    # Mark pipeline as successfully completed to trigger database swap
+    pipeline_success <<- TRUE
 }

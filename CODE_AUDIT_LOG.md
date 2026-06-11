@@ -179,3 +179,7 @@ All changes to core R/Python scripts and LLM prompts are logged here.
 ### Configured LFM-2 24B as Default Extraction Model
 - **Files**: `manifest.json`
 - **Strategic Intent**: Switch the default metadata extraction model from DeepSeek-Chat to Liquid LFM-2 24B (`liquid/lfm-2-24b-a2b`) in the central manifest to leverage its significantly lower token pricing ($0.03/$0.12 per 1M tokens) for cost-efficient bulk ingestion.
+
+### Implemented Blue-Green Database Swapping in Pipeline Runner
+- **Files**: `alpha/pipeline_runner.R`
+- **Strategic Intent**: Modify the database connection and termination blocks in `run_pipeline` to perform ingestion and writes to a temporary workspace database (`newsletters.db.temp`) instead of the active production database. Implement an exit hook that closes the connection and performs an atomic file rename (swap) over the active database path only upon a 100% successful run. This guarantees reader uptime for the FastAPI server and prevents locks during active ingestion runs.
