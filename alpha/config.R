@@ -12,12 +12,39 @@ get_config <- function() {
     # DB configuration
     db_path <- Sys.getenv("DUCKDB_PATH", unset = "alpha/newsletters.db")
     
-    # Model agnosticism configuration
-    llm_provider <- Sys.getenv("LLM_PROVIDER", unset = "openrouter")
-    llm_model <- Sys.getenv("LLM_MODEL", unset = "deepseek/deepseek-chat")
+    # Helper to traverse manifest JSON safely
+    get_manifest_val <- function(manifest, path, default) {
+        val <- manifest
+        for (p in path) {
+            if (is.null(val) || !p %in% names(val)) return(default)
+            val <- val[[p]]
+        }
+        if (is.null(val) || is.na(val)) return(default)
+        return(val)
+    }
     
-    embedding_provider <- Sys.getenv("EMBEDDING_PROVIDER", unset = "openrouter")
-    embedding_model <- Sys.getenv("EMBEDDING_MODEL", unset = "nomic-embed-text")
+    # Load manifest model settings if file exists
+    manifest_defaults <- list()
+    if (file.exists("manifest.json")) {
+        tryCatch({
+            manifest_defaults <- jsonlite::read_json("manifest.json", simplifyVector = TRUE)
+        }, error = function(e) {
+            message("Warning: Failed to parse manifest.json: ", e$message)
+        })
+    }
+    
+    default_llm_provider <- get_manifest_val(manifest_defaults, c("pipeline_models", "metadata_extraction", "provider"), "openrouter")
+    default_llm_model <- get_manifest_val(manifest_defaults, c("pipeline_models", "metadata_extraction", "model"), "deepseek/deepseek-chat")
+    
+    default_emb_provider <- get_manifest_val(manifest_defaults, c("pipeline_models", "vector_embeddings", "provider"), "openrouter")
+    default_emb_model <- get_manifest_val(manifest_defaults, c("pipeline_models", "vector_embeddings", "model"), "nomic-embed-text")
+    
+    # Model agnosticism configuration
+    llm_provider <- Sys.getenv("LLM_PROVIDER", unset = default_llm_provider)
+    llm_model <- Sys.getenv("LLM_MODEL", unset = default_llm_model)
+    
+    embedding_provider <- Sys.getenv("EMBEDDING_PROVIDER", unset = default_emb_provider)
+    embedding_model <- Sys.getenv("EMBEDDING_MODEL", unset = default_emb_model)
     
     # Provider keys & hosts
     openrouter_api_key <- Sys.getenv("OPENROUTER_API_KEY", unset = "")

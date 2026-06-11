@@ -139,8 +139,39 @@ All changes to core R/Python scripts and LLM prompts are logged here.
 ### Updated Technical Handoff Documentation
 - **Files**: `HANDOFF.md`
 - **Strategic Intent**: Document the newly integrated Regional Ingestion Survey Application and 6-Month Project Rollout Plan in the central workspace handoff guide. Updated the project directory structure, listed operational setup commands for the survey tool, described the scoped data flows, and aligned roadmap details to aid smooth handover and replication.
+## 2026-06-10
+
+### Implemented MIME Header Decoding and Quoted-Printable Parser for Email Ingestion
+- **Files**: `alpha/email_ingester.R`
+- **Strategic Intent**: Add RFC 2047 MIME encoded-word parsing (`decode_mime_header`) to correctly decode Base64 and Quoted-Printable Subject and From headers, correcting raw encoding issues in email title fields (such as in body13912). Implement a pure, native R Quoted-Printable decoder (`decode_qp`) to replace non-existent package dependencies, fixing base64/quoted-printable payload parsing bugs in bodies and headers (such as body13914, body13915, and body13918).
+
+### Hardened LLM Prompts for Language Detection and Original Summaries
+- **Files**: `alpha/prompts.R`
+- **Strategic Intent**: Refine instructions in the system prompts to enforce strict mapping between the actual written language of the source text and the `detected_language` field. Add strict instructions to write `summary_orig` in English if the detected source language is English, preventing erroneous translations into French/German based on semantic country topics.
 
 
+### Resolved RFC 2822 Header Folding, Boundary Slicing, QP Decoding Order, and English Summary Consistency
+- **Files**: `alpha/email_ingester.R`, `alpha/pipeline_runner.R`, `scratch/test_gmail_ingestion.R`
+- **Strategic Intent**: Add RFC 2822 header unfolding to handle multiline subject/from/date headers (fixing title truncation). Fix adjacent MIME encoded words decoding space issue. Reorder transfer encoding (QP/Base64) decoding to occur before HTML parsing to prevent malformed tags/CSS bleeding. Fix boundary regex splits to use `fixed()` to escape boundary strings containing regex special characters. Programmatically override `summary_orig` to match `summary_en` when `detected_language == "en"` to prevent translation instruction degradation by smaller LLMs.
 
+### Added Warning-Free Date Parsing to RSS Ingest Module
+- **Files**: `alpha/rss_ingester.R`
+- **Strategic Intent**: Add `parse_rss_date` helper function utilizing standard R `as.POSIXct` calls prior to `lubridate` fallback. This handles RFC 2822 format variations (e.g. Dakaractu with/without commas) and avoids PCRE2 duplicate named subpatterns compilation warnings on modern R environments.
 
+## 2026-06-11
 
+### Enforced Ingestion Tool Platform Tagging
+- **Files**: `alpha/pipeline_runner.R`
+- **Strategic Intent**: Enforce reliable content-type tagging based on the actual tool used for ingestion (email, rss, telegram, subscription, fediverse) by injecting a platform attribute during raw record retrieval. This overrides LLM-derived classification tags in the DuckDB `content_type` field, preventing generic "Article" or "Newsletter" designations.
+
+### Implemented Canonical Link Extraction for Emails
+- **Files**: `alpha/email_ingester.R`
+- **Strategic Intent**: Parse email HTML structure during body conversion to detect and extract the "View in browser" or "Read online" URLs, setting it as the canonical URL metadata field for the email record. This enables cross-channel URL-based deduplication against RSS and web scraped resources.
+
+### Embedded Extracted Topics and Themes for Semantic Vector Search
+- **Files**: `alpha/pipeline_runner.R`, `scratch/reembed_corpus.R`
+- **Strategic Intent**: Modify the embedding text construction in both the runtime pipeline orchestrator and the re-embedding maintenance utility script to append the extracted `topics` and `themes` metadata below the text summaries. This forces the vector embeddings to semantically index these structural markers, allowing vector search queries to match topic/theme keywords natively without schema migrations.
+
+### Created Central Pipeline Models Manifest
+- **Files**: `manifest.json`, `alpha/config.R`
+- **Strategic Intent**: Create a central, project-level model configuration manifest `manifest.json` outlining active models/providers across Ingestion, Embeddings, and Evaluation phases. Update the R configuration layer (`alpha/config.R`) to parse this file and use its settings as fallback defaults, improving portability and easing pipeline model maintenance.

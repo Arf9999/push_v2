@@ -62,7 +62,10 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
             message("Gmail ingestion failed: ", e$message)
             return(list())
         })
-        raw_items <- c(raw_items, gmail_recs)
+        if (length(gmail_recs) > 0) {
+            gmail_recs <- lapply(gmail_recs, function(x) { x$platform <- "email"; x })
+            raw_items <- c(raw_items, gmail_recs)
+        }
     }
     
     # B. Fetch RSS Feeds
@@ -75,7 +78,10 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
                 message("RSS feed failed (", name, "): ", e$message)
                 return(list())
             })
-            raw_items <- c(raw_items, rss_recs)
+            if (length(rss_recs) > 0) {
+                rss_recs <- lapply(rss_recs, function(x) { x$platform <- "rss"; x })
+                raw_items <- c(raw_items, rss_recs)
+            }
         }
     }
     
@@ -89,7 +95,10 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
                 message("Telegram channel failed (", chan, "): ", e$message)
                 return(list())
             })
-            raw_items <- c(raw_items, tg_recs)
+            if (length(tg_recs) > 0) {
+                tg_recs <- lapply(tg_recs, function(x) { x$platform <- "telegram"; x })
+                raw_items <- c(raw_items, tg_recs)
+            }
         }
     }
     
@@ -103,7 +112,10 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
                 message("Subscription feed failed (", name, "): ", e$message)
                 return(list())
             })
-            raw_items <- c(raw_items, sub_recs)
+            if (length(sub_recs) > 0) {
+                sub_recs <- lapply(sub_recs, function(x) { x$platform <- "subscription"; x })
+                raw_items <- c(raw_items, sub_recs)
+            }
         }
     }
     
@@ -117,7 +129,10 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
                 message("Fediverse ingestion failed for handle (", handle, "): ", e$message)
                 return(list())
             })
-            raw_items <- c(raw_items, fedi_recs)
+            if (length(fedi_recs) > 0) {
+                fedi_recs <- lapply(fedi_recs, function(x) { x$platform <- "fediverse"; x })
+                raw_items <- c(raw_items, fedi_recs)
+            }
         }
     }
     
@@ -183,23 +198,43 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
         
         if (is.null(parsed_analysis)) next
         
+        # Enforce summary_orig = summary_en programmatically when detected_language == "en"
+        if (!is.null(parsed_analysis$detected_language) && parsed_analysis$detected_language == "en") {
+            parsed_analysis$summary_orig <- parsed_analysis$summary_en
+        }
+        
         # 6. Generate Vector Embeddings
-        # English Vector (embeds English summary)
+        topics_str <- paste(parsed_analysis$topics, collapse = ", ")
+        themes_str <- paste(parsed_analysis$themes, collapse = ", ")
+        
+        # Combine summary with topics and themes to ensure they are captured in the vector space
+        embedding_text_en <- paste0(
+            parsed_analysis$summary_en, 
+            "\nTopics: ", topics_str, 
+            "\nThemes: ", themes_str
+        )
+        
+        # English Vector (embeds English summary + topics + themes)
         message("Generating English summary embedding...")
         en_embed <- tryCatch({
-            generate_embeddings(parsed_analysis$summary_en, config, space = "english")[[1]]
+            generate_embeddings(embedding_text_en, config, space = "english")[[1]]
         }, error = function(e) {
             message("English embedding generation failed: ", e$message)
             return(NULL)
         })
         
-        # Multilingual Vector (embeds original language summary)
+        # Multilingual Vector (embeds original language summary + topics + themes)
         message("Generating Multilingual summary embedding...")
         orig_summary_txt <- ifelse(!is.null(parsed_analysis$summary_orig) && parsed_analysis$summary_orig != "",
                                    parsed_analysis$summary_orig,
                                    parsed_analysis$summary_en)
+        embedding_text_orig <- paste0(
+            orig_summary_txt,
+            "\nTopics: ", topics_str,
+            "\nThemes: ", themes_str
+        )
         multiling_embed <- tryCatch({
-            generate_embeddings(orig_summary_txt, config, space = "multilingual")[[1]]
+            generate_embeddings(embedding_text_orig, config, space = "multilingual")[[1]]
         }, error = function(e) {
             message("Multilingual embedding generation failed: ", e$message)
             return(NULL)
@@ -209,7 +244,9 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
         # Parse publisher metadata
         pub_author <- parsed_analysis$publisher_metadata$author
         pub_pub <- parsed_analysis$publisher_metadata$publisher
-        pub_plat <- parsed_analysis$publisher_metadata$platform
+        
+        # Enforce platform tagging based on actual ingestion tool/source type
+        pub_plat <- if (!is.null(item$platform)) item$platform else parsed_analysis$publisher_metadata$platform
         
         # Fallbacks
         if (is.null(pub_author) || is.na(pub_author)) pub_author <- "Unknown"
