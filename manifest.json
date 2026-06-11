@@ -4,7 +4,7 @@
   "pipeline_models": {
     "metadata_extraction": {
       "provider": "openrouter",
-      "model": "deepseek/deepseek-chat",
+      "model": "liquid/lfm-2-24b-a2b",
       "description": "Used for language detection, translation, summarization, entity extraction, and category classification."
     },
     "vector_embeddings": {

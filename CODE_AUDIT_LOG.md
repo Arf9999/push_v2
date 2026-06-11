@@ -175,3 +175,7 @@ All changes to core R/Python scripts and LLM prompts are logged here.
 ### Created Central Pipeline Models Manifest
 - **Files**: `manifest.json`, `alpha/config.R`
 - **Strategic Intent**: Create a central, project-level model configuration manifest `manifest.json` outlining active models/providers across Ingestion, Embeddings, and Evaluation phases. Update the R configuration layer (`alpha/config.R`) to parse this file and use its settings as fallback defaults, improving portability and easing pipeline model maintenance.
+
+### Configured LFM-2 24B as Default Extraction Model
+- **Files**: `manifest.json`
+- **Strategic Intent**: Switch the default metadata extraction model from DeepSeek-Chat to Liquid LFM-2 24B (`liquid/lfm-2-24b-a2b`) in the central manifest to leverage its significantly lower token pricing ($0.03/$0.12 per 1M tokens) for cost-efficient bulk ingestion.
