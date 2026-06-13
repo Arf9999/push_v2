@@ -11,4 +11,9 @@ scratch/retool_search_temp/
 __pycache__/
 *.pyc
 rollout_plan/
+credentials.json
+alpha/credentials.json
 
+FORENSIC_LOG
+*.txt
+*.eml

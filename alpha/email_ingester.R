@@ -31,6 +31,9 @@ connect_to_gmail <- function(username, password) {
         timeout_ms = 30000
     )
     
+    # Increase buffer size from 16KB default to 1MB to speed up raw MIME downloads
+    con$reset_buffersize(1048576)
+    
     return(con)
 }
 
@@ -329,14 +332,31 @@ process_email_record <- function(email_text, uid) {
         sender_email <- stringr::str_match(from_field, email_regex)[, 2]
     }
     
+    # Parse publisher name/domain from from_field to avoid hardcoding "Email Intake"
+    pub_name <- "Email Intake"
+    if (stringr::str_detect(from_field, "<[^>]+>")) {
+        name_part <- stringr::str_trim(gsub("<[^>]+>", "", from_field))
+        name_part <- gsub("^['\"]|['\"]$", "", name_part)
+        name_part <- stringr::str_trim(name_part)
+        if (name_part != "") {
+            pub_name <- name_part
+        }
+    } else if (stringr::str_detect(from_field, "@")) {
+        domain_part <- stringr::str_match(from_field, "@([^>\\s]+)")[, 2]
+        if (!is.na(domain_part) && domain_part != "") {
+            pub_name <- domain_part
+        }
+    }
+    
     list(
         uid = uid,
         datetime = date_field,
-        source = "Email Intake",
+        source = pub_name,
         sender = sender_email,
         title = subj_field,
         url = browser_url,
-        body = body
+        body = body,
+        raw_email = email_text
     )
 }
 

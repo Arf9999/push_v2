@@ -136,6 +136,10 @@ All changes to core R/Python scripts and LLM prompts are logged here.
 - **Files**: `rollout_plan/rollout_plan.md`, `rollout_plan/rollout_gantt.csv`, `rollout_plan/gantt_chart.png`
 - **Strategic Intent**: Align the 6-month project rollout schedule to run precisely from May 15, 2026 to October 31, 2026. Adjusted all phase breakdowns, durations, and Gantt charts to conform to this specific timeline.
 
+### Corrected Email Ingestion Date Parsing and Implementation of Results Timeline
+- **Files**: `alpha/pipeline_runner.R`, `alpha/static/dashboard.js`, `scratch/backfill_raw_emails.R`, `scratch/backfill_email_dates.R`
+- **Strategic Intent**: Ensure email dates stored in `datetime` reflect the actual email send/header date rather than falling back to ingestion system time due to `as.POSIXct` parsing failure of RFC 2822 format. Added a line chart showing search results counts grouped by actual email/item dates dynamically updating in the frontend. Created a date correction utility script and updated the backfiller to parse dates from the fetched headers.
+
 ### Updated Technical Handoff Documentation
 - **Files**: `HANDOFF.md`
 - **Strategic Intent**: Document the newly integrated Regional Ingestion Survey Application and 6-Month Project Rollout Plan in the central workspace handoff guide. Updated the project directory structure, listed operational setup commands for the survey tool, described the scoped data flows, and aligned roadmap details to aid smooth handover and replication.
@@ -183,3 +187,29 @@ All changes to core R/Python scripts and LLM prompts are logged here.
 ### Implemented Blue-Green Database Swapping in Pipeline Runner
 - **Files**: `alpha/pipeline_runner.R`
 - **Strategic Intent**: Modify the database connection and termination blocks in `run_pipeline` to perform ingestion and writes to a temporary workspace database (`newsletters.db.temp`) instead of the active production database. Implement an exit hook that closes the connection and performs an atomic file rename (swap) over the active database path only upon a 100% successful run. This guarantees reader uptime for the FastAPI server and prevents locks during active ingestion runs.
+
+### Optimized Database Lock Concurrency via In-Memory Processing & Transactions
+- **Files**: `alpha/pipeline_runner.R`, `scratch/ingest_500_emails.R`
+- **Strategic Intent**: Transition from Blue-Green database file copies to a pure in-memory extraction model. Process all long-running LLM and embedding generation steps in memory, keeping database connections entirely closed during API calls. Open a single, short-lived transaction at the very end to batch insert the processed records in a few milliseconds. This completely eliminates file copy overhead and guarantees that the database remains unlocked and read-queryable by the dashboard throughout active ingestion runs.
+
+### Prevented OpenRouter LFM-2 Infinite Token Generation Loops
+- **Files**: `alpha/model_adapter.R`
+- **Strategic Intent**: Add `max_tokens = 1500` to OpenRouter request payloads to safeguard against infinite output token generation loops. Under certain inputs in JSON mode, the `liquid/lfm-2-24b-a2b` model would loop repeating character sequences (e.g. `\u2014` or `eshini`) endlessly, inflating output token usage to over 26k tokens, incurring unnecessary costs, and stalling the ingestion runner. This constraint limits output length to a safe ceiling sufficient for the JSON extraction schema. Added a regex pattern match (`(.{3,})\\1{8,}`) to detect recurring characters and validation checks for JSON truncation, automatically triggering up to 3 retries (resubmissions) to guarantee a clean, complete response before proceeding.
+
+### Refined Analysis Prompts to Eliminate Meta-Referential Summary Commentary
+- **Files**: `alpha/prompts.R`
+- **Strategic Intent**: Refine instructions in the metadata extraction system prompt to explicitly prohibit self-referential introductory phrases (e.g. \"The article discusses\", \"this text describes\", \"the author covers\"). Enforce direct summary writing in both English and original language fields to improve narrative search quality and eliminate conversational filler.
+
+### Implemented Dashboard Enhancements, Multi-Select Type, and EML Downloader
+- **Files**: `alpha/email_ingester.R`, `alpha/app.py`, `alpha/static/index.html`, `alpha/static/dashboard.js`, `scratch/backfill_raw_emails.R`
+- **Strategic Intent**: Enforce dynamic fallback publisher name extraction from From headers instead of hardcoded 'Email Intake'. Expand the FastAPI REST backend to support raw email download endpoints (`/api/newsletters/{uid}/download-eml`) and query filtering across list parameters (`content_type`), sorting criteria (`similarity` vs `date`), and date ranges (`start_date` and `end_date`). Build interactive multi-select pills on the dashboard front-end alongside date range filters and a download EML button, verifying integration via automated browser subagents. Create a background migration script to backfill existing records with raw MIME payloads from Gmail IMAP.
+
+
+
+
+
+## 2026-06-12
+
+### Transitioned to Python-Based Low-Latency IMAP Ingestion and Real-Time Daemon
+- **Files**: `alpha/email_ingester.py`, `alpha/email_daemon.py`, `alpha/model_adapter.py`, `alpha/prompts.py`, `alpha/entity_resolver.py`, `scratch/fast_ingest_mailbox.py`, `alpha/pipeline.md`
+- **Strategic Intent**: Transitioned email ingestion from R's `mRpostman` to Python's `imapclient` library. Implemented a singleton persistent IMAP connection manager and a background daemon (`email_daemon.py`) using **IMAP IDLE** to receive real-time notifications of new incoming emails. Rewrote historical bulk ingestion into a parallelized Python script (`fast_ingest_mailbox.py`) that utilizes selective fetch commands (fetching only `ENVELOPE`, `BODY[TEXT]`, and `RFC822.HEADER` in a single IMAP call) and parses MIME payloads locally in memory via the Python standard `email` package. This completely eliminates concurrent connection overhead, stays within Google's 2.5 GB daily download limit, and bypasses Gmail IMAP command rate limit throttling (`[THROTTLED]` errors). Logged structural documentation in `alpha/pipeline.md`.

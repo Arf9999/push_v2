@@ -124,6 +124,33 @@
                     </div>
                 </div>
             </div>
+            <div class="filter-row" style="display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; background: rgba(0, 0, 0, 0.15); padding: 12px 16px; border-radius: 12px; border: 1px solid var(--border-color);">
+                <div class="filter-group" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <span class="toggle-label" style="padding: 0;"><i class="fa-solid fa-filter"></i> Type:</span>
+                    <div id="type-pills-container" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" class="type-pill-btn active" data-type="email" style="background: rgba(16, 185, 129, 0.2); border: 1px solid var(--primary-color); color: var(--text-primary); padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer; transition: var(--transition);">Email</button>
+                        <button type="button" class="type-pill-btn active" data-type="rss" style="background: rgba(16, 185, 129, 0.2); border: 1px solid var(--primary-color); color: var(--text-primary); padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer; transition: var(--transition);">RSS</button>
+                        <button type="button" class="type-pill-btn active" data-type="telegram" style="background: rgba(16, 185, 129, 0.2); border: 1px solid var(--primary-color); color: var(--text-primary); padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer; transition: var(--transition);">Telegram</button>
+                        <button type="button" class="type-pill-btn active" data-type="subscription" style="background: rgba(16, 185, 129, 0.2); border: 1px solid var(--primary-color); color: var(--text-primary); padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer; transition: var(--transition);">Subscription</button>
+                        <button type="button" class="type-pill-btn active" data-type="fediverse" style="background: rgba(16, 185, 129, 0.2); border: 1px solid var(--primary-color); color: var(--text-primary); padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer; transition: var(--transition);">Fediverse</button>
+                    </div>
+                </div>
+                <div class="filter-group" style="display: flex; align-items: center; gap: 8px;">
+                    <span class="toggle-label" style="padding: 0;"><i class="fa-solid fa-sort"></i> Sort By:</span>
+                    <select id="sort-by" style="background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); color: var(--text-primary); padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; outline: none; cursor: pointer; font-family: var(--font-body);">
+                        <option value="similarity">Similarity</option>
+                        <option value="date">Date (Newest)</option>
+                    </select>
+                </div>
+                <div class="filter-group" style="display: flex; align-items: center; gap: 8px;">
+                    <span class="toggle-label" style="padding: 0;"><i class="fa-solid fa-calendar-days"></i> From:</span>
+                    <input type="date" id="filter-start-date" style="background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); color: var(--text-primary); padding: 5px 10px; border-radius: 8px; font-size: 12px; outline: none; font-family: var(--font-body); cursor: pointer;">
+                </div>
+                <div class="filter-group" style="display: flex; align-items: center; gap: 8px;">
+                    <span class="toggle-label" style="padding: 0;">To:</span>
+                    <input type="date" id="filter-end-date" style="background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); color: var(--text-primary); padding: 5px 10px; border-radius: 8px; font-size: 12px; outline: none; font-family: var(--font-body); cursor: pointer;">
+                </div>
+            </div>
             <form id="search-form" class="search-form-container">
                 <div class="search-input-wrapper">
                     <i class="fa-solid fa-magnifying-glass search-bar-icon"></i>
@@ -150,6 +177,12 @@
                     <button class="btn-secondary" id="btn-export-csv" style="display: none;">
                         <i class="fa-solid fa-file-csv"></i> Export CSV
                     </button>
+                </div>
+                <div class="glass-panel" id="results-timeline-card" style="display: none; padding: 20px; margin-bottom: 16px;">
+                    <h3 style="font-family: var(--font-heading); font-size: 14px; font-weight: 600; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">Results Timeline</h3>
+                    <div style="position: relative; height: 140px; width: 100%;">
+                        <canvas id="results-timeline-chart"></canvas>
+                    </div>
                 </div>
                 <div class="results-list" id="results-list">
                     <!-- Cards will be dynamically inserted here -->

@@ -42,43 +42,22 @@ format_vector_for_duckdb <- function(vec) {
 #' @param fediverse_handles Character vector of Fediverse/Mastodon handles
 #' @export
 run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscription_feeds = list(), fediverse_handles = c()) {
-    message("--- Initializing Pipeline Run (Blue-Green Swap) ---")
+    message("--- Initializing Pipeline Run (In-Memory Processing & Quick Commit) ---")
     config <- get_config()
-    
     db_path <- config$db_path
-    temp_db_path <- paste0(db_path, ".temp")
-    pipeline_success <- FALSE
     
-    # 1. Copy active DB to temp DB if active DB exists
-    if (file.exists(db_path)) {
-        message("[Pipeline] Copying active DB to temporary workspace...")
-        file.copy(from = db_path, to = temp_db_path, overwrite = TRUE)
-    }
-    
-    # 2. Establish DB Connection to the temp database
-    con <- get_db_connection(temp_db_path)
-    
-    # On exit: ensure connection is closed, and swap temp DB to active DB if completed successfully
-    on.exit({
-        close_db_connection(con)
-        if (file.exists(temp_db_path)) {
-            if (pipeline_success) {
-                message("\n[Pipeline] Swapping temporary database to active production database...")
-                # Atomic rename (overwrites active DB)
-                success <- file.rename(from = temp_db_path, to = db_path)
-                if (success) {
-                    message("[Pipeline] Database swap successful. Active DB updated.")
-                } else {
-                    message("Error: Database swap failed.")
-                }
-            } else {
-                message("\n[Pipeline] Pipeline did not complete successfully. Discarding temporary database.")
-                file.remove(temp_db_path)
-            }
-        }
+    # 1. Open a brief connection to fetch existing UIDs, then close it
+    message("[Pipeline] Fetching existing UIDs from database...")
+    con_init <- get_db_connection(db_path)
+    init_db(con_init)
+    existing_res <- tryCatch({
+        DBI::dbGetQuery(con_init, "SELECT uid FROM newsletters;")
+    }, error = function(e) {
+        data.frame(uid = character(0))
     })
+    close_db_connection(con_init)
     
-    init_db(con)
+    existing_uids <- existing_res$uid
     
     # 2. Ingest raw items from sources
     raw_items <- list()
@@ -173,22 +152,23 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
     
     message("\nFetched total ", length(raw_items), " raw items. Commencing duplicate check...")
     
-    # 3. Check for duplicates against existing DB records
-    processed_count <- 0
+    # Filter duplicates in-memory
+    is_new <- sapply(raw_items, function(item) !(item$uid %in% existing_uids))
+    raw_items <- raw_items[is_new]
     
+    if (length(raw_items) == 0) {
+        message("All fetched raw items already exist in the database. Pipeline complete.")
+        return(invisible(NULL))
+    }
+    
+    message("Found ", length(raw_items), " new items to process.")
+    
+    processed_records <- list()
+    
+    # 3. Process new articles in-memory
     for (item in raw_items) {
         uid <- item$uid
-        
-        # Check if record already exists in newsletters table
-        exists_query <- "SELECT 1 FROM newsletters WHERE uid = ?;"
-        exists_res <- DBI::dbGetQuery(con, exists_query, params = list(uid))
-        
-        if (nrow(exists_res) > 0) {
-            # Skip duplicate
-            next
-        }
-        
-        message("\n--- Processing New Record ---")
+        message("\n--- Processing New Record (In-Memory) ---")
         message("Title: ", item$title)
         message("Source: ", item$source)
         
@@ -270,6 +250,11 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
             return(NULL)
         })
         
+        if (is.null(en_embed) || is.null(multiling_embed)) {
+            message("Skipping item due to embedding failure.")
+            next
+        }
+        
         # 7. Deduplicate and Save Entities
         # Parse publisher metadata
         pub_author <- parsed_analysis$publisher_metadata$author
@@ -283,7 +268,6 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
         if (is.null(pub_pub) || is.na(pub_pub)) pub_pub <- item$source
         if (is.null(pub_plat) || is.na(pub_plat)) pub_plat <- item$source
         
-        # 8. Save Record to newsletters table
         # We need to construct the lists as comma separated strings
         topics_str <- paste(parsed_analysis$topics, collapse = ", ")
         themes_str <- paste(parsed_analysis$themes, collapse = ", ")
@@ -291,68 +275,111 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
         
         # Enforce timestamp parsing
         parsed_dt <- tryCatch({
-            as.POSIXct(item$datetime)
+            date_str <- stringr::str_trim(item$datetime)
+            dt <- as.POSIXct(date_str, format = "%a, %d %b %Y %H:%M:%S %z", tz = "UTC")
+            if (is.na(dt)) dt <- as.POSIXct(date_str, format = "%a, %d %b %Y %H:%M:%S", tz = "UTC")
+            if (is.na(dt)) dt <- as.POSIXct(date_str, format = "%a %d %b %Y %H:%M:%S %z", tz = "UTC")
+            if (is.na(dt)) dt <- as.POSIXct(date_str, format = "%d %b %Y %H:%M:%S %z", tz = "UTC")
+            if (is.na(dt)) dt <- as.POSIXct(date_str, format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+            if (is.na(dt)) dt <- as.POSIXct(date_str, format = "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+            if (is.na(dt)) dt <- as.POSIXct(date_str, format = "%Y-%m-%dT%H:%M:%S%z", tz = "UTC")
+            if (is.na(dt)) dt <- as.POSIXct(date_str)
+            dt
         }, error = function(e) Sys.time())
         if (is.na(parsed_dt)) parsed_dt <- Sys.time()
         
-        # Set parameters
-        insert_sql <- "
-            INSERT INTO newsletters (
-                uid, datetime, source, sender, title, url, summary,
-                original_language_summary, detected_language, truncated, content_type,
-                topics, themes, keywords, subscription_marketing,
-                english_embedding, multilingual_embedding
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            );
-        "
-        
-        # Execute query using DBI parameter bindings
-        # Note: DuckDB R driver supports native list types, but passing numeric vectors directly works
-        # when formatted or bound as lists. Let's pass them as R numeric vectors, which duckdb DBI maps.
-        DBI::dbExecute(con, insert_sql, params = list(
-            uid,
-            parsed_dt,
-            pub_pub,
-            item$sender,
-            item$title,
-            item$url,
-            parsed_analysis$summary_en,
-            parsed_analysis$summary_orig,
-            parsed_analysis$detected_language,
-            truncated_flag,
-            pub_plat,
-            topics_str,
-            themes_str,
-            keywords_str,
-            as.logical(parsed_analysis$subscription_marketing),
-            list(en_embed),
-            list(multiling_embed)
-        ))
-        
-        # Resolve entities database-side after parent record exists
-        if (!is.null(parsed_analysis$entities) && is.data.frame(parsed_analysis$entities) && nrow(parsed_analysis$entities) > 0) {
-            message("Resolving and storing ", nrow(parsed_analysis$entities), " entities...")
-            tryCatch({
-                resolve_and_store_entities(uid, parsed_analysis$entities, con)
-            }, error = function(e) {
-                message("Entity resolving failed: ", e$message)
-            })
-        }
-        
-        processed_count <- processed_count + 1
-        message("Successfully saved record to DuckDB: ", item$title)
+        processed_records[[length(processed_records) + 1]] <- list(
+            uid = uid,
+            datetime = parsed_dt,
+            source = pub_pub,
+            sender = item$sender,
+            title = item$title,
+            url = item$url,
+            summary = parsed_analysis$summary_en,
+            original_language_summary = parsed_analysis$summary_orig,
+            detected_language = parsed_analysis$detected_language,
+            truncated = truncated_flag,
+            content_type = pub_plat,
+            topics = topics_str,
+            themes = themes_str,
+            keywords = keywords_str,
+            subscription_marketing = as.logical(parsed_analysis$subscription_marketing),
+            english_embedding = en_embed,
+            multilingual_embedding = multiling_embed,
+            raw_email = if (!is.null(item$raw_email)) item$raw_email else NA_character_,
+            entities = parsed_analysis$entities
+        )
+        message("Record fully processed in-memory: ", item$title)
     }
     
-    message("\n--- Pipeline Run Complete. Processed ", processed_count, " new articles ---")
+    if (length(processed_records) == 0) {
+        message("\nNo records successfully processed. Pipeline complete.")
+        return(invisible(NULL))
+    }
+    
+    # 8. Batch Insert all processed records in a single quick transaction
+    message("\n[Pipeline] Opening database to commit ", length(processed_records), " records...")
+    con <- get_db_connection(db_path)
+    DBI::dbBegin(con)
+    
+    commit_success <- tryCatch({
+        for (rec in processed_records) {
+            insert_sql <- "
+                INSERT INTO newsletters (
+                    uid, datetime, source, sender, title, url, summary,
+                    original_language_summary, detected_language, truncated, content_type,
+                    topics, themes, keywords, subscription_marketing,
+                    english_embedding, multilingual_embedding, raw_email
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                );
+            "
+            DBI::dbExecute(con, insert_sql, params = list(
+                rec$uid,
+                rec$datetime,
+                rec$source,
+                rec$sender,
+                rec$title,
+                rec$url,
+                rec$summary,
+                rec$original_language_summary,
+                rec$detected_language,
+                rec$truncated,
+                rec$content_type,
+                rec$topics,
+                rec$themes,
+                rec$keywords,
+                rec$subscription_marketing,
+                list(rec$english_embedding),
+                list(rec$multilingual_embedding),
+                rec$raw_email
+            ))
+            
+            if (!is.null(rec$entities) && is.data.frame(rec$entities) && nrow(rec$entities) > 0) {
+                resolve_and_store_entities(rec$uid, rec$entities, con)
+            }
+        }
+        DBI::dbCommit(con)
+        TRUE
+    }, error = function(e) {
+        DBI::dbRollback(con)
+        message("Error committing database transaction: ", e$message)
+        FALSE
+    }, finally = {
+        close_db_connection(con)
+    })
+    
+    if (commit_success) {
+        message("[Pipeline] Successfully committed ", length(processed_records), " records to DB.")
+    } else {
+        message("[Pipeline] Failed to commit database records.")
+    }
     
     # 9. Sync copy of DB to external Cloud Storage bucket if configured
-    if (config$gcs_bucket_name != "") {
+    if (commit_success && config$gcs_bucket_name != "") {
         message("\n[Pipeline] Syncing database to GCS: ", config$gcs_bucket_name)
-        # Note: Handled by system gsutil/aws sync command or Python sync subagent
-        # We'll print instructions for the FastAPI startup replication.
     }
     
-    # Mark pipeline as successfully completed to trigger database swap
-    pipeline_success <<- TRUE
+    message("\n--- Pipeline Run Complete ---")
 }
+

@@ -28,6 +28,35 @@ clean_html <- function(html_text) {
     return(cleaned)
 }
 
+#' Parse RSS/XML pubDate to POSIXct
+#'
+#' @param date_str Date string.
+#' @return A POSIXct object.
+parse_rss_date <- function(date_str) {
+    if (is.na(date_str) || date_str == "") return(Sys.time())
+    
+    # Clean up leading/trailing whitespaces
+    date_str <- stringr::str_trim(date_str)
+    
+    # Try formats using standard R functions first (faster & warning-free)
+    dt <- as.POSIXct(date_str, format = "%a, %d %b %Y %H:%M:%S %z", tz = "UTC")
+    if (is.na(dt)) dt <- as.POSIXct(date_str, format = "%a %d %b %Y %H:%M:%S %z", tz = "UTC")
+    if (is.na(dt)) dt <- as.POSIXct(date_str, format = "%d %b %Y %H:%M:%S %z", tz = "UTC")
+    if (is.na(dt)) dt <- as.POSIXct(date_str, format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+    if (is.na(dt)) dt <- as.POSIXct(date_str, format = "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+    if (is.na(dt)) dt <- as.POSIXct(date_str, format = "%Y-%m-%dT%H:%M:%S%z", tz = "UTC")
+    
+    # Fallback to lubridate if none of the above matched
+    if (is.na(dt)) {
+        dt <- tryCatch({
+            lubridate::parse_date_time(date_str, orders = c("a, d b Y H:M:S z", "a d b Y H:M:S z", "d b Y H:M:S z", "Y-m-d H:M:S", "Y-m-dTH:M:Sz"))
+        }, error = function(e) Sys.time())
+    }
+    
+    if (is.na(dt)) dt <- Sys.time()
+    return(dt)
+}
+
 #' Fetch and Parse a Single RSS Feed
 #'
 #' @param feed_url URL of the RSS feed.
@@ -105,13 +134,8 @@ fetch_rss_feed <- function(feed_url, feed_name = "RSS Feed") {
         link <- stringr::str_trim(link)
         body <- clean_html(desc)
         
-        # Parse datetime with fallback formats
-        parsed_dt <- tryCatch({
-            # Try RFC 2822 / ISO 8601 parsing
-            lubridate::parse_date_time(date_str, orders = c("a, d b Y H:M:S z", "Y-m-d H:M:S", "Y-m-dTH:M:Sz"))
-        }, error = function(e) Sys.time())
-        
-        if (is.na(parsed_dt)) parsed_dt <- Sys.time()
+        # Parse datetime with robust helper
+        parsed_dt <- parse_rss_date(date_str)
         
         # Generate stable UID based on link hash
         uid <- digest::digest(link, algo = "md5")

@@ -1,20 +1,48 @@
 import os
 import math
+import json
 import httpx
 import duckdb
 import sqlite3
 import hashlib
 import secrets
 from typing import List, Optional
-from fastapi import FastAPI, Query, HTTPException, Header, Depends
+from fastapi import FastAPI, Query, HTTPException, Header, Depends, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env
 load_dotenv()
+
+# Load credentials from credentials.json if it exists
+credentials_path = "alpha/credentials.json"
+if os.path.exists(credentials_path):
+    try:
+        with open(credentials_path, "r") as f:
+            creds = json.load(f)
+            for k, v in creds.items():
+                if v and k not in os.environ:
+                    os.environ[k] = str(v)
+    except Exception as e:
+        print(f"Warning: Failed to load credentials from {credentials_path}: {e}")
+
+# Load manifest model defaults if it exists
+manifest_path = "manifest.json"
+if os.path.exists(manifest_path):
+    try:
+        with open(manifest_path, "r") as f:
+            manifest = json.load(f)
+            models = manifest.get("pipeline_models", {})
+            emb_config = models.get("vector_embeddings", {})
+            if "EMBEDDING_PROVIDER" not in os.environ and emb_config.get("provider"):
+                os.environ["EMBEDDING_PROVIDER"] = emb_config["provider"]
+            if "EMBEDDING_MODEL" not in os.environ and emb_config.get("model"):
+                os.environ["EMBEDDING_MODEL"] = emb_config["model"]
+    except Exception as e:
+        print(f"Warning: Failed to parse {manifest_path}: {e}")
 
 USERS_DB_PATH = os.getenv("USERS_DB_PATH", "alpha/users.db")
 
@@ -210,10 +238,19 @@ def get_db_con():
         con = duckdb.connect(DB_PATH)
         con.close()
         
-    con = duckdb.connect(DB_PATH, read_only=True)
-    con.execute("SET max_memory = '512MB';")
-    con.execute("SET threads = 1;")
-    return con
+    for _ in range(10):
+        try:
+            con = duckdb.connect(DB_PATH, read_only=True)
+            con.execute("SET max_memory = '2GB';")
+            con.execute("SET threads = 2;")
+            return con
+        except duckdb.IOException as e:
+            if "Conflicting lock is held" in str(e):
+                import time
+                time.sleep(0.5)
+                continue
+            raise
+    raise Exception("Database is locked by background ingestion script.")
 
 # ---------------------------------------------------------
 # API Pydantic Schemas
@@ -559,6 +596,10 @@ async def root():
 async def search_newsletters(
     q: str = Query(..., description="Query terms to search"),
     space: str = Query("english", regex="^(english|multilingual)$"),
+    content_type: Optional[str] = Query(None, description="Filter by type of publication"),
+    sort_by: str = Query("similarity", regex="^(similarity|date)$", description="Sort by similarity or date"),
+    start_date: Optional[str] = Query(None, description="Filter start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="Filter end date (YYYY-MM-DD)"),
     limit: int = Query(20, ge=1, le=100)
 ):
     """
@@ -574,11 +615,31 @@ async def search_newsletters(
         
     embedding_col = "english_embedding" if space == "english" else "multilingual_embedding"
     
+    # Build dynamic query and parameters
+    params = [query_vector, query_norm]
+    where_clauses = [f"{embedding_col} IS NOT NULL"]
+    
+    if content_type and content_type.lower() != "all":
+        types_list = [t.strip().lower() for t in content_type.split(",") if t.strip()]
+        if types_list and "all" not in types_list:
+            placeholders = ", ".join("?" for _ in types_list)
+            where_clauses.append(f"content_type IN ({placeholders})")
+            params.extend(types_list)
+        
+    if start_date:
+        where_clauses.append("datetime >= ?")
+        params.append(start_date)
+        
+    if end_date:
+        where_clauses.append("datetime <= ?")
+        params.append(end_date)
+        
+    where_str = " AND ".join(where_clauses)
+    order_clause = "similarity DESC" if sort_by == "similarity" else "datetime DESC, similarity DESC"
+    
     # 2. Run query in DuckDB
     con = get_db_con()
     try:
-        # We pass query_vector directly as a DuckDB parameter. DuckDB Python maps lists to ARRAY/LIST types.
-        # Calculation: list_dot_product(col, query) / (sqrt(list_dot_product(col, col)) * query_norm)
         search_query = f"""
             SELECT 
                 uid, 
@@ -586,6 +647,7 @@ async def search_newsletters(
                 source, 
                 sender, 
                 title, 
+                url, 
                 summary, 
                 original_language_summary, 
                 detected_language, 
@@ -594,20 +656,22 @@ async def search_newsletters(
                 themes, 
                 keywords,
                 (list_dot_product({embedding_col}, ?) / (sqrt(list_dot_product({embedding_col}, {embedding_col})) * ?)) as similarity,
-                (SELECT string_agg(canonical_name || ':' || entity_type, ';') FROM entities WHERE entities.uid = newsletters.uid) as entity_list
+                (SELECT string_agg(canonical_name || ':' || entity_type, ';') FROM entities WHERE entities.uid = newsletters.uid) as entity_list,
+                (raw_email IS NOT NULL AND raw_email != '') as has_raw_email
             FROM newsletters
-            WHERE {embedding_col} IS NOT NULL
-            ORDER BY similarity DESC
+            WHERE {where_str}
+            ORDER BY {order_clause}
             LIMIT ?;
         """
+        params.append(limit)
         
-        results = con.execute(search_query, [query_vector, query_norm, limit]).fetchall()
+        results = con.execute(search_query, params).fetchall()
         
         newsletters = []
         for r in results:
             entities = []
-            if r[13]:
-                for ent_str in r[13].split(";"):
+            if r[14]:
+                for ent_str in r[14].split(";"):
                     if ":" in ent_str:
                         name, etype = ent_str.split(":", 1)
                         entities.append({"name": name, "type": etype})
@@ -618,21 +682,53 @@ async def search_newsletters(
                 "source": r[2],
                 "sender": r[3],
                 "title": r[4],
-                "summary": r[5],
-                "original_language_summary": r[6],
-                "detected_language": r[7],
-                "content_type": r[8],
-                "topics": [t.strip() for t in r[9].split(",")] if r[9] else [],
-                "themes": [t.strip() for t in r[10].split(",")] if r[10] else [],
-                "keywords": [t.strip() for t in r[11].split(",")] if r[11] else [],
-                "similarity": float(r[12]) if r[12] is not None and not math.isnan(r[12]) else 0.0,
-                "entities": entities
+                "url": r[5],
+                "summary": r[6],
+                "original_language_summary": r[7],
+                "detected_language": r[8],
+                "content_type": r[9],
+                "topics": [t.strip() for t in r[10].split(",")] if r[10] else [],
+                "themes": [t.strip() for t in r[11].split(",")] if r[11] else [],
+                "keywords": [t.strip() for t in r[12].split(",")] if r[12] else [],
+                "similarity": float(r[13]) if r[13] is not None and not math.isnan(r[13]) else 0.0,
+                "entities": entities,
+                "has_raw_email": bool(r[15])
             })
             
         return {"query": q, "space": space, "results": newsletters}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+    finally:
+        con.close()
+
+@app.get("/api/newsletters/{uid}/download-eml")
+async def download_eml(uid: str):
+    """
+    Endpoint to download the raw MIME email payload as a .eml file.
+    """
+    con = get_db_con()
+    try:
+        res = con.execute("SELECT raw_email, title FROM newsletters WHERE uid = ?;", [uid]).fetchone()
+        if not res or not res[0]:
+            raise HTTPException(status_code=404, detail="Raw email content not found for this record.")
+        
+        raw_email_content = res[0]
+        title = res[1] or "email"
+        
+        # Sanitize title to use as filename
+        safe_title = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
+        safe_title = safe_title[:50] or "email"
+        filename = f"{safe_title}.eml"
+        
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+        return Response(content=raw_email_content, media_type="message/rfc822", headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database retrieval failed: {str(e)}")
     finally:
         con.close()
 

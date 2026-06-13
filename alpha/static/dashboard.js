@@ -1,6 +1,7 @@
 // Dashboard State Management
 let activeSearchSpace = "english";
 let languagesChart = null;
+let resultsTimelineChart = null;
 let rawSearchResults = [];
 let currentSearchResults = [];
 
@@ -67,6 +68,24 @@ function setupEventListeners() {
 
     spaceMultilingual.addEventListener("click", () => {
         setActiveSpace("multilingual");
+    });
+
+    // Type pills listeners
+    document.querySelectorAll(".type-pill-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            btn.classList.toggle("active");
+            if (btn.classList.contains("active")) {
+                btn.style.background = "rgba(16, 185, 129, 0.2)";
+                btn.style.borderColor = "var(--primary-color)";
+            } else {
+                btn.style.background = "rgba(0, 0, 0, 0.3)";
+                btn.style.borderColor = "var(--border-color)";
+            }
+            const query = document.getElementById("search-input").value.trim();
+            if (query) {
+                executeSearch();
+            }
+        });
     });
 
     // Export CSV click listener
@@ -350,6 +369,13 @@ async function executeSearch() {
     const resultsCount = document.getElementById("results-count");
     const btnExportCsv = document.getElementById("btn-export-csv");
     
+    // Get filter/sort values
+    const activeTypes = Array.from(document.querySelectorAll(".type-pill-btn.active")).map(btn => btn.dataset.type);
+    const filterType = activeTypes.length > 0 ? activeTypes.join(",") : "none";
+    const sortBy = document.getElementById("sort-by")?.value || "similarity";
+    const startDate = document.getElementById("filter-start-date")?.value || "";
+    const endDate = document.getElementById("filter-end-date")?.value || "";
+    
     // Reset save search star indicator
     const btnSaveSearch = document.getElementById("btn-save-search");
     if (btnSaveSearch) {
@@ -372,7 +398,17 @@ async function executeSearch() {
     `;
     
     try {
-        const url = `/api/search?q=${encodeURIComponent(query)}&space=${activeSearchSpace}&limit=20`;
+        let url = `/api/search?q=${encodeURIComponent(query)}&space=${activeSearchSpace}&sort_by=${sortBy}&limit=20`;
+        if (filterType !== "all") {
+            url += `&content_type=${encodeURIComponent(filterType)}`;
+        }
+        if (startDate) {
+            url += `&start_date=${encodeURIComponent(startDate)}`;
+        }
+        if (endDate) {
+            url += `&end_date=${encodeURIComponent(endDate)}`;
+        }
+        
         const response = await fetch(url);
         
         if (!response.ok) {
@@ -437,6 +473,8 @@ function renderSearchResults(results) {
                 <p>No matches found. Try refining your keywords or query idea.</p>
             </div>
         `;
+        const card = document.getElementById("results-timeline-card");
+        if (card) card.style.display = "none";
         return;
     }
     
@@ -449,11 +487,16 @@ function renderSearchResults(results) {
                 <p>No matches found with similarity >= ${Math.round(sliderValue * 100)}%. Try lowering the sensitivity slider.</p>
             </div>
         `;
+        const card = document.getElementById("results-timeline-card");
+        if (card) card.style.display = "none";
         return;
     }
     
     if (btnExportCsv) btnExportCsv.style.display = "flex";
     resultsCount.innerText = `Found ${filteredResults.length} matches (Threshold: ${Math.round(sliderValue * 100)}%)`;
+    
+    // Render the results timeline chart
+    renderResultsTimelineChart(filteredResults);
     
     filteredResults.forEach(rec => {
         const card = document.createElement("article");
@@ -462,8 +505,8 @@ function renderSearchResults(results) {
         const similarityPct = Math.round(rec.similarity * 100);
         
         // Setup tags
-        let topicsHtml = rec.topics.map(t => `<span class="tag tag-topic">${t}</span>`).join("");
-        let themesHtml = rec.themes.map(t => `<span class="tag tag-theme">${t}</span>`).join("");
+        let topicsHtml = rec.topics.map(t => `<span class="tag tag-topic" onclick="triggerFilter('${t.replace(/'/g, "\\'")}')" style="cursor: pointer;">${t}</span>`).join("");
+        let themesHtml = rec.themes.map(t => `<span class="tag tag-theme" onclick="triggerFilter('${t.replace(/'/g, "\\'")}')" style="cursor: pointer;">${t}</span>`).join("");
         
         // Render entities from rec.entities list
         let entitiesHtml = "";
@@ -482,6 +525,9 @@ function renderSearchResults(results) {
                     <span class="source-badge">${rec.source}</span>
                     <span class="lang-badge">${rec.detected_language}</span>
                     <span class="date-text">${rec.datetime.split(" ")[0]}</span>
+                    <span class="uid-badge" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">ID: ${rec.uid}</span>
+                    ${rec.url && rec.url !== "NA" && rec.url !== "" ? 
+                      `<a href="${rec.url}" target="_blank" rel="noopener noreferrer" class="meta-url-link" style="color: var(--color-primary, #10b981); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500;"><i class="fa-solid fa-link"></i> Source</a>` : ""}
                 </div>
                 <div class="similarity-badge">
                     <span>${similarityPct}% match</span>
@@ -491,7 +537,18 @@ function renderSearchResults(results) {
                 </div>
             </div>
             
-            <h3 class="article-title">${rec.title}</h3>
+            <h3 class="article-title">
+                ${rec.url && rec.url !== "NA" && rec.url !== "" ? 
+                  `<a href="${rec.url}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none; border-bottom: 1px dashed transparent; transition: border-color 0.2s;" onmouseover="this.style.borderColor='currentColor'" onmouseout="this.style.borderColor='transparent'">${rec.title} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.75em; opacity: 0.8; margin-left: 4px;"></i></a>` : 
+                  rec.title}
+            </h3>
+            
+            ${rec.url && rec.url !== "NA" && rec.url !== "" ? 
+              `<div class="browser-url-box" style="margin-top: 4px; padding: 6px 12px; background: rgba(0, 0, 0, 0.2); border-radius: 8px; border: 1px solid var(--border-color); font-size: 11.5px; color: var(--text-secondary);">
+                 <i class="fa-solid fa-earth-americas" style="color: var(--primary-color);"></i> <strong>Browser Version:</strong> 
+                 <a href="${rec.url}" target="_blank" rel="noopener noreferrer" style="color: var(--primary-color); text-decoration: underline; margin-left: 4px;">View Original Source</a>
+                 <span style="font-style: italic; font-size: 10.5px; opacity: 0.7; margin-left: 8px;">(Original links may be stale or expired)</span>
+               </div>` : ""}
             
             <div class="article-summary-box">
                 <div class="summary-heading">
@@ -502,10 +559,16 @@ function renderSearchResults(results) {
                 <p class="summary-text" id="summary-txt-${rec.uid}">${rec.summary}</p>
             </div>
             
-            <div class="tags-row">
-                ${topicsHtml}
-                ${themesHtml}
-                ${entitiesHtml}
+            <div class="tags-row" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div class="tags-left" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    ${topicsHtml}
+                    ${themesHtml}
+                    ${entitiesHtml}
+                </div>
+                ${rec.content_type === "email" && rec.has_raw_email ? 
+                  `<button class="btn-secondary btn-sm download-eml-btn" data-uid="${rec.uid}" style="flex-shrink: 0;">
+                     <i class="fa-solid fa-download"></i> Download .eml
+                   </button>` : ""}
             </div>
         `;
         
@@ -532,6 +595,15 @@ function renderSearchResults(results) {
             });
         }
     });
+
+    // Bind click handlers for EML download buttons
+    document.querySelectorAll(".download-eml-btn").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const uid = btn.dataset.uid;
+            window.open(`/api/newsletters/${uid}/download-eml`, "_blank");
+        });
+    });
 }
 
 // Export current search results to CSV
@@ -545,6 +617,7 @@ function exportCurrentResultsToCSV() {
         "Source",
         "Sender",
         "Title",
+        "URL",
         "English Summary",
         "Original Summary",
         "Detected Language",
@@ -566,6 +639,7 @@ function exportCurrentResultsToCSV() {
             item.source || "",
             item.sender || "",
             item.title || "",
+            item.url || "",
             item.summary || "",
             item.original_language_summary || "",
             item.detected_language || "",
@@ -1149,5 +1223,108 @@ async function triggerBatchCheck() {
         btnRunBatch.disabled = false;
         btnRunBatch.innerHTML = originalHtml;
     }
+}
+
+// Render Results Timeline Chart using Chart.js
+function renderResultsTimelineChart(filteredResults) {
+    const card = document.getElementById("results-timeline-card");
+    if (!card) return;
+
+    if (!filteredResults || filteredResults.length === 0) {
+        card.style.display = "none";
+        return;
+    }
+
+    // Show the card
+    card.style.display = "block";
+
+    // Aggregate counts by date
+    const dateCounts = {};
+    filteredResults.forEach(rec => {
+        if (rec.datetime) {
+            const dateStr = rec.datetime.split(" ")[0]; // YYYY-MM-DD
+            dateCounts[dateStr] = (dateCounts[dateStr] || 0) + 1;
+        }
+    });
+
+    // Sort dates chronologically
+    const sortedDates = Object.keys(dateCounts).sort();
+    const counts = sortedDates.map(d => dateCounts[d]);
+
+    const ctx = document.getElementById("results-timeline-chart").getContext("2d");
+
+    if (resultsTimelineChart) {
+        resultsTimelineChart.destroy();
+    }
+
+    // Design: modern aesthetic with gradient fill
+    const gradient = ctx.createLinearGradient(0, 0, 0, 140);
+    gradient.addColorStop(0, "rgba(16, 185, 129, 0.4)"); // Emerald green with opacity
+    gradient.addColorStop(1, "rgba(16, 185, 129, 0.0)");
+
+    resultsTimelineChart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: sortedDates,
+            datasets: [{
+                label: "Results Count",
+                data: counts,
+                borderColor: "#10B981", // Emerald Green
+                borderWidth: 2,
+                backgroundColor: gradient,
+                fill: true,
+                tension: 0.3,
+                pointBackgroundColor: "#10B981",
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    mode: "index",
+                    intersect: false,
+                    backgroundColor: "rgba(17, 24, 39, 0.9)",
+                    titleColor: "#ffffff",
+                    bodyColor: "#d1d5db",
+                    borderColor: "rgba(255, 255, 255, 0.08)",
+                    borderWidth: 1
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        color: "#9CA3AF",
+                        font: {
+                            family: "Outfit",
+                            size: 10
+                        }
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: "#9CA3AF",
+                        stepSize: 1,
+                        font: {
+                            family: "Outfit",
+                            size: 10
+                        }
+                    },
+                    grid: {
+                        color: "rgba(255, 255, 255, 0.05)"
+                    }
+                }
+            }
+        }
+    });
 }
 

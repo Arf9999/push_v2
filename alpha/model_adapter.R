@@ -31,142 +31,202 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
     }
     messages[[length(messages) + 1]] <- list(role = "user", content = prompt)
     
+    max_retries <- 3
+    attempt <- 1
     content <- NULL
     reasoning <- NULL
     
-    # 2. Execute call depending on provider
-    if (provider == "openrouter") {
-        if (config$openrouter_api_key == "") {
-            stop("OPENROUTER_API_KEY is not configured.")
+    while (attempt <= max_retries) {
+        content <- NULL
+        reasoning <- NULL
+        
+        # 2. Execute call depending on provider
+        err_msg <- tryCatch({
+            if (provider == "openrouter") {
+                if (config$openrouter_api_key == "") {
+                    stop("OPENROUTER_API_KEY is not configured.")
+                }
+                
+                req <- httr2::request("https://openrouter.ai/api/v1/chat/completions") %>%
+                    httr2::req_headers(
+                        "Authorization" = paste("Bearer", config$openrouter_api_key),
+                        "HTTP-Referer" = "https://github.com/Arf9999/newsletter_phase2",
+                        "X-Title" = "Narrative Intelligence Pipeline"
+                    )
+                    
+                body <- list(
+                    model = model,
+                    messages = messages,
+                    max_tokens = 1500
+                )
+                if (json_mode) {
+                    body$response_format <- list(type = "json_object")
+                }
+                
+                req <- req %>% httr2::req_body_json(body) %>% httr2::req_retry(max_tries = 3)
+                resp <- httr2::req_perform(req)
+                res_json <- httr2::resp_body_json(resp)
+                
+                content <- res_json$choices[[1]]$message$content
+                reasoning <- res_json$choices[[1]]$message$reasoning_content
+                if (is.null(reasoning)) {
+                    reasoning <- res_json$choices[[1]]$message$reasoning
+                }
+                
+            } else if (provider == "ollama") {
+                url <- paste0(config$ollama_host, "/api/chat")
+                body <- list(
+                    model = model,
+                    messages = messages,
+                    stream = FALSE
+                )
+                if (json_mode) {
+                    body$format <- "json"
+                }
+                
+                req <- httr2::request(url) %>%
+                    httr2::req_body_json(body) %>%
+                    httr2::req_retry(max_tries = 2)
+                    
+                resp <- httr2::req_perform(req)
+                res_json <- httr2::resp_body_json(resp)
+                
+                content <- res_json$message$content
+                
+            } else if (provider == "openai") {
+                if (config$openai_api_key == "") {
+                    stop("OPENAI_API_KEY is not configured.")
+                }
+                
+                req <- httr2::request("https://api.openai.com/v1/chat/completions") %>%
+                    httr2::req_headers("Authorization" = paste("Bearer", config$openai_api_key))
+                    
+                body <- list(
+                    model = model,
+                    messages = messages
+                )
+                if (json_mode) {
+                    body$response_format <- list(type = "json_object")
+                }
+                
+                req <- req %>% httr2::req_body_json(body) %>% httr2::req_retry(max_tries = 3)
+                resp <- httr2::req_perform(req)
+                res_json <- httr2::resp_body_json(resp)
+                
+                content <- res_json$choices[[1]]$message$content
+                reasoning <- res_json$choices[[1]]$message$reasoning_content
+                
+            } else if (provider == "gemini") {
+                if (config$gemini_api_key == "") {
+                    stop("GEMINI_API_KEY is not configured.")
+                }
+                
+                url <- paste0("https://generativelanguage.googleapis.com/v1beta/models/", model, ":generateContent?key=", config$gemini_api_key)
+                
+                # Build contents structure for Gemini
+                contents <- list(
+                    parts = list(
+                        list(text = prompt)
+                    )
+                )
+                
+                # System instructions if provided
+                body <- list(contents = list(contents))
+                if (!is.null(system_prompt) && system_prompt != "") {
+                    body$systemInstruction <- list(parts = list(list(text = system_prompt)))
+                }
+                if (json_mode) {
+                    body$generationConfig <- list(responseMimeType = "application/json")
+                }
+                
+                req <- httr2::request(url) %>%
+                    httr2::req_body_json(body) %>%
+                    httr2::req_retry(max_tries = 3)
+                    
+                resp <- httr2::req_perform(req)
+                res_json <- httr2::resp_body_json(resp)
+                
+                content <- res_json$candidates[[1]]$content$parts[[1]]$text
+                
+                # Gemini thought extraction if reasoning model and parts contain thought field
+                parts <- res_json$candidates[[1]]$content$parts
+                if (length(parts) > 1) {
+                    for (i in seq_along(parts)) {
+                        if (!is.null(parts[[i]]$thought)) {
+                            reasoning <- parts[[i]]$text
+                            break
+                        }
+                    }
+                }
+                
+            } else {
+                stop("Unknown LLM provider specified: ", provider)
+            }
+            NULL
+        }, error = function(e) {
+            e$message
+        })
+        
+        if (!is.null(err_msg)) {
+            message("LLM API call failed on attempt ", attempt, ": ", err_msg)
+            attempt <- attempt + 1
+            if (attempt <= max_retries) Sys.sleep(1)
+            next
         }
         
-        req <- httr2::request("https://openrouter.ai/api/v1/chat/completions") %>%
-            httr2::req_headers(
-                "Authorization" = paste("Bearer", config$openrouter_api_key),
-                "HTTP-Referer" = "https://github.com/Arf9999/newsletter_phase2",
-                "X-Title" = "Narrative Intelligence Pipeline"
-            )
+        # 3. Validate response
+        if (!is.null(content) && content != "") {
+            has_repeats <- grepl("(.{3,})\\1{8,}", content, perl = TRUE)
+            json_invalid <- FALSE
             
-        body <- list(
-            model = model,
-            messages = messages
-        )
-        if (json_mode) {
-            body$response_format <- list(type = "json_object")
-        }
-        
-        req <- req %>% httr2::req_body_json(body) %>% httr2::req_retry(max_tries = 3)
-        resp <- httr2::req_perform(req)
-        res_json <- httr2::resp_body_json(resp)
-        
-        content <- res_json$choices[[1]]$message$content
-        reasoning <- res_json$choices[[1]]$message$reasoning_content
-        if (is.null(reasoning)) {
-            reasoning <- res_json$choices[[1]]$message$reasoning
-        }
-        
-    } else if (provider == "ollama") {
-        url <- paste0(config$ollama_host, "/api/chat")
-        body <- list(
-            model = model,
-            messages = messages,
-            stream = FALSE
-        )
-        if (json_mode) {
-            body$format <- "json"
-        }
-        
-        req <- httr2::request(url) %>%
-            httr2::req_body_json(body) %>%
-            httr2::req_retry(max_tries = 2)
-            
-        resp <- httr2::req_perform(req)
-        res_json <- httr2::resp_body_json(resp)
-        
-        content <- res_json$message$content
-        
-    } else if (provider == "openai") {
-        if (config$openai_api_key == "") {
-            stop("OPENAI_API_KEY is not configured.")
-        }
-        
-        req <- httr2::request("https://api.openai.com/v1/chat/completions") %>%
-            httr2::req_headers("Authorization" = paste("Bearer", config$openai_api_key))
-            
-        body <- list(
-            model = model,
-            messages = messages
-        )
-        if (json_mode) {
-            body$response_format <- list(type = "json_object")
-        }
-        
-        req <- req %>% httr2::req_body_json(body) %>% httr2::req_retry(max_tries = 3)
-        resp <- httr2::req_perform(req)
-        res_json <- httr2::resp_body_json(resp)
-        
-        content <- res_json$choices[[1]]$message$content
-        reasoning <- res_json$choices[[1]]$message$reasoning_content
-        
-    } else if (provider == "gemini") {
-        if (config$gemini_api_key == "") {
-            stop("GEMINI_API_KEY is not configured.")
-        }
-        
-        url <- paste0("https://generativelanguage.googleapis.com/v1beta/models/", model, ":generateContent?key=", config$gemini_api_key)
-        
-        # Build contents structure for Gemini
-        contents <- list(
-            parts = list(
-                list(text = prompt)
-            )
-        )
-        
-        # System instructions if provided
-        body <- list(contents = list(contents))
-        if (!is.null(system_prompt) && system_prompt != "") {
-            body$systemInstruction <- list(parts = list(list(text = system_prompt)))
-        }
-        if (json_mode) {
-            body$generationConfig <- list(responseMimeType = "application/json")
-        }
-        
-        req <- httr2::request(url) %>%
-            httr2::req_body_json(body) %>%
-            httr2::req_retry(max_tries = 3)
-            
-        resp <- httr2::req_perform(req)
-        res_json <- httr2::resp_body_json(resp)
-        
-        content <- res_json$candidates[[1]]$content$parts[[1]]$text
-        
-        # Gemini thought extraction if reasoning model and parts contain thought field
-        parts <- res_json$candidates[[1]]$content$parts
-        if (length(parts) > 1) {
-            for (i in seq_along(parts)) {
-                if (!is.null(parts[[i]]$thought)) {
-                    reasoning <- parts[[i]]$text
-                    break
+            if (json_mode) {
+                json_parsed <- tryCatch({
+                    jsonlite::fromJSON(content)
+                    TRUE
+                }, error = function(e) FALSE)
+                if (!json_parsed) {
+                    json_invalid <- TRUE
                 }
             }
+            
+            if (has_repeats || json_invalid) {
+                reason <- if (has_repeats) "recurring characters detected" else "malformed JSON/truncated"
+                message("LLM output rejected (", reason, ") on attempt ", attempt, ". Retrying...")
+                
+                # Log failed attempt to forensic log for audit trace
+                log_forensic_response(
+                    provider = paste0(provider, "-rejected-", reason),
+                    model = model,
+                    prompt = prompt,
+                    system_prompt = system_prompt,
+                    response_text = content,
+                    reasoning_content = reasoning,
+                    config = config
+                )
+                
+                attempt <- attempt + 1
+                if (attempt <= max_retries) Sys.sleep(1)
+            } else {
+                # Success! Log and return
+                log_forensic_response(
+                    provider = provider,
+                    model = model,
+                    prompt = prompt,
+                    system_prompt = system_prompt,
+                    response_text = content,
+                    reasoning_content = reasoning,
+                    config = config
+                )
+                return(content)
+            }
+        } else {
+            message("Empty response on attempt ", attempt, ". Retrying...")
+            attempt <- attempt + 1
+            if (attempt <= max_retries) Sys.sleep(1)
         }
-        
-    } else {
-        stop("Unknown LLM provider specified: ", provider)
     }
     
-    # 3. Log to Forensic Log
-    log_forensic_response(
-        provider = provider,
-        model = model,
-        prompt = prompt,
-        system_prompt = system_prompt,
-        response_text = content,
-        reasoning_content = reasoning,
-        config = config
-    )
-    
-    return(content)
+    stop("Failed to obtain a valid, non-repeating completion after ", max_retries, " attempts.")
 }
 
 #' Generate Vector Embeddings

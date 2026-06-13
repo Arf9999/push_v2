@@ -15,7 +15,7 @@ get_db_connection <- function(db_path) {
     con <- DBI::dbConnect(duckdb::duckdb(), db_path)
     
     # Enforce memory and thread safety constraints for resource-constrained VMs
-    DBI::dbExecute(con, "SET max_memory = '512MB';")
+    DBI::dbExecute(con, "SET max_memory = '1.5GB';")
     DBI::dbExecute(con, "SET threads = 1;")
     
     return(con)
@@ -48,15 +48,20 @@ init_db <- function(con) {
             subscription_marketing BOOLEAN,
             english_embedding FLOAT[],
             multilingual_embedding FLOAT[],
+            raw_email TEXT,
             ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     ")
     
-    # Schema migration check: Ensure 'url' column exists in existing databases
+    # Schema migration check: Ensure 'url' and 'raw_email' columns exist in existing databases
     cols <- DBI::dbGetQuery(con, "PRAGMA table_info('newsletters');")
     if (!("url" %in% cols$name)) {
         message("Migration: Adding 'url' column to existing newsletters table.")
         DBI::dbExecute(con, "ALTER TABLE newsletters ADD COLUMN url VARCHAR;")
+    }
+    if (!("raw_email" %in% cols$name)) {
+        message("Migration: Adding 'raw_email' column to existing newsletters table.")
+        DBI::dbExecute(con, "ALTER TABLE newsletters ADD COLUMN raw_email TEXT;")
     }
     
     # 2. Create entity ID sequence and entities table

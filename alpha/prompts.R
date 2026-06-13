@@ -11,9 +11,9 @@ get_analysis_system_prompt <- function() {
     prompt <- paste(
         "You are an expert multilingual narrative analyst.",
         "Analyze the provided text and return a JSON object with the following fields:",
-        "- \"detected_language\": The ISO 639-1 code of the source language (e.g. \"en\", \"fr\", \"pt\", \"sw\", \"zu\", etc.).",
-        "- \"summary_en\": A detailed English summary capturing key narrative arguments, actors, and nuance.",
-        "- \"summary_orig\": A summary in the original language preserving native idioms and rhetorical style.",
+        "- \"detected_language\": The ISO 639-1 code of the language the source text is actually written in (e.g. \"en\", \"fr\", \"pt\", \"sw\", \"zu\", etc.). CRITICAL: This is the language of the text itself, NOT the country being discussed. If the source text is written in English, this MUST be \"en\".",
+        "- \"summary_en\": A factual English summary capturing key narrative arguments, actors, and nuance. MANDATORY RULE: Adopt a direct journalistic tone. You are the reporter stating the facts. Do NOT attribute the text to a medium or author. FORBIDDEN PHRASES: 'A Telegram post', 'The article discusses', 'The author states', 'This text describes'. START DIRECTLY WITH THE SUBJECT. Example format: 'Government officials announced...' rather than 'The post reports that government officials announced...'.",
+        "- \"summary_orig\": A summary in the original language preserving native idioms. MANDATORY RULE: Must follow the exact same strict journalistic rules as summary_en. No meta-referential language whatsoever. If detected_language is \"en\", summary_orig MUST also be in English.",
         "- \"publisher_metadata\": An object with \"author\" (the writer, or null), \"publisher\" (publication name, or null), \"platform\" (e.g. \"Substack\", \"Ghost\", \"Telegram\", \"RSS\", or null), and \"date\" (YYYY-MM-DD format, or null).",
         "- \"entities\": A list of extracted entities, each being an object with \"raw_name\" (the name of the person, organization, acronym, or region as written) and \"entity_type\" (must be one of: \"PERSON\", \"ORG\", \"GPE\", \"LOC\"). Extract acronyms like 'UN', 'SARS', 'SADC' as ORG.",
         "- \"topics\": A list of up to 5 main general topic labels (e.g. [\"Oil & Gas\", \"Governance\"]).",
