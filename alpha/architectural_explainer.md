@@ -4,7 +4,21 @@ This document explains the **strategic reasoning, trade-offs, and design decisio
 
 ---
 
-## 1. Database Segregation: SQLite vs. DuckDB
+## 1. Central Configuration Manifest (`manifest.json`)
+The pipeline's model dependency mappings are isolated in a declarative, project-level manifest file (`manifest.json`). 
+
+### The Settings:
+- **`metadata_extraction`**: Specifies the primary LLM provider and model (e.g., OpenRouter's `liquid/lfm-2-24b-a2b`) responsible for language detection, translation, summarization, structured entity extraction, and classification.
+- **`vector_embeddings`**: Establishes the provider and model (e.g., Ollama's `nomic-embed-text:latest`) used to vectorize textual descriptions, producing the dual 768-dimensional float arrays stored in the database.
+- **`translation_evaluation`**: Declares the LLM-as-a-judge model used to programmatically audit translation quality, accuracy, and rhetorical preservation.
+
+### The Rationale:
+- **Model Agnosticism**: Standardizing API communications through a unified adapter allows administrators to update models, change vendors (e.g., from an external API provider to a local model running on Ollama), or upgrade versions by modifying a single configuration file without altering any R or Python code in the ingestion pipeline.
+- **Operational Decoupling**: Hardcoding provider properties inside ingest scripts leads to configuration drift and operational fragility. Consuming settings from `manifest.json` as runtime defaults ensures that pipeline components share a synchronized, single source of truth that is easily overridden via local environment variables during deployment.
+
+---
+
+## 2. Database Segregation: SQLite vs. DuckDB
 The architecture splits data persistence into two entirely separate databases: **SQLite** (`sources.db`) for the Regional Media Survey Tool and **DuckDB** (`newsletters.db`) for the core Push Media repository.
 
 ### The Rationale:
@@ -16,7 +30,7 @@ The architecture splits data persistence into two entirely separate databases: *
 
 ---
 
-## 2. Hybrid Language Pipeline: Python Daemon vs. R Runner
+## 3. Hybrid Language Pipeline: Python Daemon vs. R Runner
 The Gmail ingestion uses a real-time Python daemon (`email_daemon.py`), while the multi-source orchestrator (`run_cron.R`) is written in R.
 
 ### The Rationale:
@@ -26,7 +40,7 @@ The Gmail ingestion uses a real-time Python daemon (`email_daemon.py`), while th
 
 ---
 
-## 3. Decoupled Ingest Schema
+## 4. Decoupled Ingest Schema
 Each ingestion module (Email, RSS, Telegram, Fediverse, Substack) parses different payloads, but they all output a standardized R list containing identical keys.
 
 ### The Rationale:
@@ -35,7 +49,7 @@ Each ingestion module (Email, RSS, Telegram, Fediverse, Substack) parses differe
 
 ---
 
-## 4. In-Memory Processing & Short-Lived Transactions
+## 5. In-Memory Processing & Short-Lived Transactions
 During a pipeline run, all network requests, LLM completions, translations, and embedding calculations are performed in memory before any connection to the main database is opened.
 
 ### The Rationale:
@@ -45,7 +59,7 @@ During a pipeline run, all network requests, LLM completions, translations, and 
 
 ---
 
-## 5. Cost-Benefit Translation Failover
+## 6. Cost-Benefit Translation Failover
 The translation module attempts translations using a cheap model first, failing over to a more expensive model, and finally writing a warning if both fail.
 
 ### The Rationale:
@@ -55,7 +69,7 @@ The translation module attempts translations using a cheap model first, failing 
 
 ---
 
-## 6. Split Translation Routing: Low-Resource Language Check
+## 7. Split Translation Routing: Low-Resource Language Check
 The pipeline inspects the detected language code and routes low-resource African languages (`xh`, `zu`, `tn`, `rw`, `st`, `ss`, `wo`) through local specialized models (like `AfriqueQwen-14B-multiturn` via Ollama) while routing high-resource languages (like French or Portuguese) through general LLM API calls.
 
 ### The Rationale:
@@ -67,7 +81,7 @@ The pipeline inspects the detected language code and routes low-resource African
 
 ---
 
-## 7. Removing Database Foreign Keys
+## 8. Removing Database Foreign Keys
 We removed the database-level `FOREIGN KEY` constraint linking the `entities` table to the `newsletters` table.
 
 ### The Rationale:
@@ -77,7 +91,7 @@ We removed the database-level `FOREIGN KEY` constraint linking the `entities` ta
 
 ---
 
-## 8. Metadata Injection in Vector Embeddings
+## 9. Metadata Injection in Vector Embeddings
 We append extracted topics and themes to the text summary before generating the vector embedding.
 
 ### The Rationale:
