@@ -1,4 +1,4 @@
-# Narrative Intelligence Ingestion Pipeline Orchestrator
+# Push Media Ingestion Pipeline Orchestrator
 #
 # Coordinates modular ingestion sources (Gmail, RSS, Telegram, Substack),
 # runs LLM-based translation and entity extraction, computes dual-space vector

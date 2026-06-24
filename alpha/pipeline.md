@@ -1,6 +1,6 @@
-# Phase 2 Narrative Intelligence Pipeline Architecture & Operations Manual
+# Phase 2 Push Media Pipeline Architecture & Operations Manual
 
-This document provides a detailed technical reference for the Phase 2 Narrative Intelligence Ingestion, Analysis, and Querying Pipeline.
+This document provides a detailed technical reference for the Phase 2 Push Media Ingestion, Analysis, and Querying Pipeline.
 
 ```mermaid
 graph TD

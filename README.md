@@ -1,4 +1,4 @@
-# Narrative Intelligence Engine - Phase 2 (Model-Agnostic Local Pipeline)
+# Push Media Engine - Phase 2 (Model-Agnostic Local Pipeline)
 
 An infrastructure-independent, local-first platform designed to fetch multilingual, multi-source newsletter and PR content, extract structured metadata and narrative insights using model-agnostic LLMs, store data in a local high-performance DuckDB, and serve searches and analytics through a FastAPI dashboard.
 

@@ -127,7 +127,7 @@ def generate_completion(prompt, system_prompt=None, json_mode=False, config=None
                     headers = {
                         "Authorization": f"Bearer {api_key}",
                         "HTTP-Referer": "https://github.com/Arf9999/newsletter_phase2",
-                        "X-Title": "Narrative Intelligence Pipeline"
+                        "X-Title": "Push Media Pipeline"
                     }
                     body = {
                         "model": model,

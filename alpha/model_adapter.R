@@ -67,7 +67,7 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
                     httr2::req_headers(
                         "Authorization" = paste("Bearer", config$openrouter_api_key),
                         "HTTP-Referer" = "https://github.com/Arf9999/newsletter_phase2",
-                        "X-Title" = "Narrative Intelligence Pipeline"
+                        "X-Title" = "Push Media Pipeline"
                     )
                     
                 body <- list(

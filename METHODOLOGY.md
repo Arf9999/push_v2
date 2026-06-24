@@ -1,6 +1,6 @@
 # Phase 2 Pipeline Methodology: Algorithms, Mathematical Models, and Architecture
 
-This document details the mathematical, logical, and programmatic specifications of the core intelligence mechanisms powering the Phase 2 Narrative Intelligence Engine.
+This document details the mathematical, logical, and programmatic specifications of the core intelligence mechanisms powering the Phase 2 Push Media Engine.
 
 ---
 

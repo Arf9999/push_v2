@@ -135,7 +135,7 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> str:
     return username
 
 app = FastAPI(
-    title="Narrative Intelligence Engine API",
+    title="Push Media Engine API",
     description="Backend API for low-latency SQL-native vector search and narrative analytics."
 )
 

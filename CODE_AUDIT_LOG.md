@@ -2,6 +2,12 @@
 
 All changes to core R/Python scripts and LLM prompts are logged here.
 
+## 2026-06-24
+
+### Rebranded Pipeline to Push Media
+- **Files**: `alpha/model_adapter.py`, `alpha/pipeline_runner.R`, `alpha/static/index.html`, `alpha/model_adapter.R`, `alpha/translation_ollama.R`, `METHODOLOGY.md`, `README.md`, `CODE_AUDIT_LOG.md`
+- **Strategic Intent**: Disassociate the pipeline from "Narrative Intelligence" branding as that is a completely separate project, renaming all occurrences across workspace and documentation to "Push Media".
+
 ## 2026-05-19
 
 ### Created Project Structure and Configuration Layer
@@ -120,7 +126,7 @@ All changes to core R/Python scripts and LLM prompts are logged here.
 
 ### Implemented Fediverse Ingestion Module and Pipeline Integration
 - **Files**: `alpha/fediverse_ingester.R`, `alpha/pipeline_runner.R`, `scratch/test_fediverse.R`
-- **Strategic Intent**: Add capability to ingest public posts from Fediverse/Mastodon handles (e.g. `@username@domain`) into the Narrative Intelligence pipeline. Features public RSS feed resolving with primary/fallback URLs, HTML stripping, stable MD5 hash UIDs, and integration in `pipeline_runner.R`. Verified via `scratch/test_fediverse.R`.
+- **Strategic Intent**: Add capability to ingest public posts from Fediverse/Mastodon handles (e.g. `@username@domain`) into the Push Media pipeline. Features public RSS feed resolving with primary/fallback URLs, HTML stripping, stable MD5 hash UIDs, and integration in `pipeline_runner.R`. Verified via `scratch/test_fediverse.R`.
 
 ### Implemented Target URL Capture Across Pipeline
 - **Files**: `alpha/db_manager.R`, `alpha/pipeline_runner.R`, `alpha/rss_ingester.R`, `alpha/fediverse_ingester.R`, `alpha/subscription_ingester.R`, `alpha/telegram_ingester.R`, `alpha/email_ingester.R`, `scratch/run_integration_test.R`, `scratch/test_fediverse.R`

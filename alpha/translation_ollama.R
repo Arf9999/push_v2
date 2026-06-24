@@ -67,7 +67,7 @@ translate_ollama <- function(text, lang, model_name = "mzansilm") {
       req <- httr2::req_headers(req,
         "Authorization" = paste("Bearer", config$openrouter_api_key),
         "HTTP-Referer" = "https://github.com/Arf9999/newsletter_phase2",
-        "X-Title" = "Narrative Intelligence Pipeline Translation"
+        "X-Title" = "Push Media Pipeline Translation"
       )
       req <- httr2::req_body_json(req, body)
       req <- httr2::req_timeout(req, seconds = 120)
