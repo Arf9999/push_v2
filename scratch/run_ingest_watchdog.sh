@@ -31,8 +31,12 @@ while true; do
     RUN_LOG="$LOG_DIR/ingest_run_$(date +%Y%m%d_%H%M%S).log"
     echo "[$(ts)] [WATCHDOG] --- Run #$((restart_count + 1)) starting --- Log: $RUN_LOG"
 
+    # Reprocess flagged records first
+    echo "[$(ts)] [WATCHDOG] --- Reprocessing Flagged Records ---"
+    "$PYTHON" -u "$SCRIPT_DIR/reprocess_flagged.py" >> "$RUN_LOG" 2>&1
+
     # Run with unbuffered output so log is written in real time
-    "$PYTHON" -u "$INGEST_SCRIPT" > "$RUN_LOG" 2>&1
+    "$PYTHON" -u "$INGEST_SCRIPT" >> "$RUN_LOG" 2>&1
     EXIT_CODE=$?
 
     LAST_LINES=$(tail -5 "$RUN_LOG")

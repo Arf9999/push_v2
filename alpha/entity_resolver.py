@@ -107,8 +107,12 @@ def resolve_and_store_entities(uid, entities, con):
             entities = [{"raw_name": n, "entity_type": t} for n, t in zip(entities["name"], entities["type"])]
             
     for ent in entities:
-        raw_name = ent.get("raw_name") or ent.get("name")
-        entity_type = ent.get("entity_type") or ent.get("type")
+        if isinstance(ent, str):
+            raw_name = ent
+            entity_type = "Unknown"
+        else:
+            raw_name = ent.get("raw_name") or ent.get("name")
+            entity_type = ent.get("entity_type") or ent.get("type")
         if not raw_name or not entity_type:
             continue
             

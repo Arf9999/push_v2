@@ -7,6 +7,7 @@
 #' @importFrom stringr str_trim str_squish str_replace_all str_detect
 #' @importFrom lubridate ymd_hms parse_date_time
 #' @importFrom digest digest
+#' @importFrom xml2 read_xml xml_find_all xml_find_first xml_text
 #' @importFrom dplyr %>%
 #' @export
 
@@ -79,7 +80,10 @@ scrape_subscription_article <- function(url, publisher_name = "Subscription Publ
         sender = publisher_name,
         title = title,
         url = url,
-        body = body
+        body = body,
+        platform = "subscription",
+        raw_source = html_content,
+        image_url = NULL
     ))
 }
 
@@ -164,7 +168,10 @@ fetch_subscription_feed <- function(feed_url, publisher_name = "Subscription Pub
             sender = publisher_name,
             title = title,
             url = link,
-            body = body
+            body = body,
+            platform = "subscription",
+            raw_source = desc,
+            image_url = NULL
         )
     }
     

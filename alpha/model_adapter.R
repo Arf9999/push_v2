@@ -16,7 +16,7 @@
 #' @param json_mode Boolean, whether to request JSON response formatting.
 #' @param config Configuration list containing api keys and model settings.
 #' @return A list containing the generated text or parsed JSON.
-generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE, config = NULL) {
+generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE, config = NULL, image_url = NULL) {
     if (is.null(config)) {
         stop("Configuration list must be provided.")
     }
@@ -24,12 +24,28 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
     provider <- tolower(config$llm_provider)
     model <- config$llm_model
     
+    # Check if this is a vision/OCR request
+    has_image <- !is.null(image_url) && !is.na(image_url) && image_url != ""
+    if (has_image) {
+        # Switch model to vision model for image processing
+        model <- config$vision_model
+    }
+    
     # 1. Build messages structure
     messages <- list()
     if (!is.null(system_prompt) && system_prompt != "") {
         messages[[length(messages) + 1]] <- list(role = "system", content = system_prompt)
     }
-    messages[[length(messages) + 1]] <- list(role = "user", content = prompt)
+    
+    if (has_image) {
+        user_content <- list(
+            list(type = "text", text = prompt),
+            list(type = "image_url", image_url = list(url = image_url))
+        )
+        messages[[length(messages) + 1]] <- list(role = "user", content = user_content)
+    } else {
+        messages[[length(messages) + 1]] <- list(role = "user", content = prompt)
+    }
     
     max_retries <- 3
     attempt <- 1
@@ -63,7 +79,10 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
                     body$response_format <- list(type = "json_object")
                 }
                 
-                req <- req %>% httr2::req_body_json(body) %>% httr2::req_retry(max_tries = 3)
+                req <- req %>%
+                    httr2::req_body_json(body) %>%
+                    httr2::req_timeout(120) %>%
+                    httr2::req_retry(max_tries = 3)
                 resp <- httr2::req_perform(req)
                 res_json <- httr2::resp_body_json(resp)
                 
@@ -74,24 +93,56 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
                 }
                 
             } else if (provider == "ollama") {
-                url <- paste0(config$ollama_host, "/api/chat")
-                body <- list(
-                    model = model,
-                    messages = messages,
-                    stream = FALSE
-                )
-                if (json_mode) {
-                    body$format <- "json"
+                use_gen <- !is.null(config$use_generate) && config$use_generate
+                
+                if (use_gen) {
+                    url <- paste0(config$ollama_host, "/api/generate")
+                    # Construct prompt for base completion models by prepending system instructions
+                    raw_prompt <- if (!is.null(system_prompt) && system_prompt != "") {
+                        paste0(system_prompt, "\n\n", prompt)
+                    } else {
+                        prompt
+                    }
+                    body <- list(
+                        model = model,
+                        prompt = raw_prompt,
+                        stream = FALSE
+                    )
+                } else {
+                    url <- paste0(config$ollama_host, "/api/chat")
+                    body <- list(
+                        model = model,
+                        messages = messages,
+                        stream = FALSE
+                    )
+                    if (json_mode) {
+                        body$format <- "json"
+                    }
+                }
+                
+                if (!is.null(config$ollama_options)) {
+                    body$options <- config$ollama_options
                 }
                 
                 req <- httr2::request(url) %>%
                     httr2::req_body_json(body) %>%
+                    httr2::req_timeout(120) %>%
                     httr2::req_retry(max_tries = 2)
                     
                 resp <- httr2::req_perform(req)
                 res_json <- httr2::resp_body_json(resp)
                 
-                content <- res_json$message$content
+                if (use_gen) {
+                    content <- res_json$response
+                    if ((is.null(content) || content == "") && !is.null(res_json$thinking)) {
+                        content <- res_json$thinking
+                    }
+                } else {
+                    content <- res_json$message$content
+                    if ((is.null(content) || content == "") && !is.null(res_json$message$thinking)) {
+                        content <- res_json$message$thinking
+                    }
+                }
                 
             } else if (provider == "openai") {
                 if (config$openai_api_key == "") {
@@ -109,7 +160,10 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
                     body$response_format <- list(type = "json_object")
                 }
                 
-                req <- req %>% httr2::req_body_json(body) %>% httr2::req_retry(max_tries = 3)
+                req <- req %>%
+                    httr2::req_body_json(body) %>%
+                    httr2::req_timeout(120) %>%
+                    httr2::req_retry(max_tries = 3)
                 resp <- httr2::req_perform(req)
                 res_json <- httr2::resp_body_json(resp)
                 
@@ -141,6 +195,7 @@ generate_completion <- function(prompt, system_prompt = NULL, json_mode = FALSE,
                 
                 req <- httr2::request(url) %>%
                     httr2::req_body_json(body) %>%
+                    httr2::req_timeout(120) %>%
                     httr2::req_retry(max_tries = 3)
                     
                 resp <- httr2::req_perform(req)
@@ -272,6 +327,7 @@ generate_embeddings <- function(texts, config = NULL, space = "english") {
                     model = model,
                     input = txt
                 )) %>%
+                httr2::req_timeout(60) %>%
                 httr2::req_retry(max_tries = 3)
                 
             resp <- httr2::req_perform(req)
@@ -289,6 +345,7 @@ generate_embeddings <- function(texts, config = NULL, space = "english") {
                     model = model,
                     input = txt
                 )) %>%
+                httr2::req_timeout(60) %>%
                 httr2::req_retry(max_tries = 3)
                 
             resp <- httr2::req_perform(req)
@@ -302,6 +359,7 @@ generate_embeddings <- function(texts, config = NULL, space = "english") {
                     model = model,
                     input = txt
                 )) %>%
+                httr2::req_timeout(60) %>%
                 httr2::req_retry(max_tries = 2)
                 
             resp <- httr2::req_perform(req)
@@ -324,6 +382,7 @@ generate_embeddings <- function(texts, config = NULL, space = "english") {
                         )
                     )
                 )) %>%
+                httr2::req_timeout(60) %>%
                 httr2::req_retry(max_tries = 3)
                 
             resp <- httr2::req_perform(req)

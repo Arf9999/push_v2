@@ -3,7 +3,7 @@
 #' Fetches and parses RSS/XML news feeds for parallel narrative analysis.
 #'
 #' @importFrom httr2 request req_perform resp_body_string req_retry
-#' @importFrom xml2 read_xml xml_find_all xml_find_first xml_text
+#' @importFrom xml2 read_xml xml_find_all xml_find_first xml_text xml_attr
 #' @importFrom stringr str_trim str_replace_all str_squish
 #' @importFrom lubridate parse_date_time
 #' @importFrom digest digest
@@ -147,7 +147,10 @@ fetch_rss_feed <- function(feed_url, feed_name = "RSS Feed") {
             sender = feed_name,
             title = title,
             url = link,
-            body = body
+            body = body,
+            platform = "rss",
+            raw_source = desc,
+            image_url = NULL
         )
     }
     

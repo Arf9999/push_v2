@@ -6,7 +6,6 @@
 #' @importFrom mRpostman configure_imap
 #' @importFrom stringr str_match str_c str_detect str_split str_trim str_squish str_replace_all
 #' @importFrom XML htmlParse xpathSApply xmlValue
-#' @importFrom mime quoted_printable_decode
 #' @importFrom purrr map_chr map
 #' @importFrom tibble tibble
 #' @importFrom dplyr %>%
@@ -208,6 +207,7 @@ extract_email_body <- function(email_text) {
     if (is.na(body_part)) return(list(body = "", browser_url = NA_character_))
     
     cleaned <- stringr::str_squish(body_part)
+    cleaned <- stringr::str_replace_all(cleaned, "[\\u200b\\u200c\\u200d\\uFEFF\\u200e\\u200f]+", " ")
     cleaned <- remove_junk_lines(cleaned)
     return(list(body = cleaned, browser_url = browser_url))
 }
@@ -356,7 +356,9 @@ process_email_record <- function(email_text, uid) {
         title = subj_field,
         url = browser_url,
         body = body,
-        raw_email = email_text
+        platform = "email",
+        raw_source = email_text,
+        image_url = NULL
     )
 }
 

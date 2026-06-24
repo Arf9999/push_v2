@@ -4,7 +4,7 @@
 #' Handles formatting, retry logic, and fallback paths.
 #'
 #' @importFrom httr2 request req_perform resp_body_string req_retry
-#' @importFrom xml2 read_xml xml_find_all xml_find_first xml_text
+#' @importFrom xml2 read_xml xml_find_all xml_find_first xml_text xml_attr
 #' @importFrom stringr str_trim str_replace_all str_squish
 #' @importFrom lubridate parse_date_time
 #' @importFrom digest digest
@@ -275,7 +275,10 @@ fetch_fediverse_posts <- function(handle) {
             sender = username,
             title = title,
             url = url_to_save,
-            body = body
+            body = body,
+            platform = "fediverse",
+            raw_source = desc,
+            image_url = NULL
         )
     }
     

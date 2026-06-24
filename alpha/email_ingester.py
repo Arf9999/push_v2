@@ -11,16 +11,23 @@ class EmailHTMLParser(HTMLParser):
         self.text_parts = []
         self.current_link = None
         self.browser_url = None
+        self.in_ignored_tag = False
 
     def handle_starttag(self, tag, attrs):
-        if tag == 'a':
+        if tag in ('style', 'script', 'head', 'title', 'meta'):
+            self.in_ignored_tag = True
+        elif tag == 'a':
             self.current_link = dict(attrs).get('href', None)
 
     def handle_endtag(self, tag):
-        if tag == 'a':
+        if tag in ('style', 'script', 'head', 'title', 'meta'):
+            self.in_ignored_tag = False
+        elif tag == 'a':
             self.current_link = None
 
     def handle_data(self, data):
+        if self.in_ignored_tag:
+            return
         cleaned_data = data.strip()
         if cleaned_data:
             self.text_parts.append(cleaned_data)
@@ -42,7 +49,15 @@ def clean_html_to_text(html_content):
     parser = EmailHTMLParser()
     try:
         parser.feed(html_content)
-        return parser.get_text(), parser.browser_url
+        text = parser.get_text()
+        
+        # CRITICAL FIX: Strip invisible formatting unicode characters (zero-width joiners, etc.)
+        # Marketing emails (like News24) often repeat these characters 50+ times to hide preview text.
+        # This causes non-transformer State-Space Models (like Liquid LFM) to hit recursive collapse states
+        # and endlessly repeat tokens, leading to malformed JSON and timeouts.
+        text = re.sub(r'[\u200b\u200c\u200d\uFEFF\u200e\u200f]+', ' ', text)
+        
+        return text, parser.browser_url
     except Exception:
         return html_content, None
 

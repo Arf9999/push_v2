@@ -14,11 +14,14 @@ source("alpha/rss_ingester.R")
 source("alpha/telegram_ingester.R")
 source("alpha/subscription_ingester.R")
 source("alpha/fediverse_ingester.R")
+source("alpha/translation_ollama.R")
 source("alpha/entity_resolver.R")
 
 library(jsonlite)
 library(DBI)
 library(duckdb)
+# Load low‑resource language list
+low_res_langs <- fromJSON(file.path('alpha', 'low_resource_languages.json'))
 library(digest)
 library(dplyr)
 
@@ -40,6 +43,7 @@ format_vector_for_duckdb <- function(vec) {
 #' @param telegram_channels Character vector of telegram channel names
 #' @param subscription_feeds Named list of substack/ghost feeds
 #' @param fediverse_handles Character vector of Fediverse/Mastodon handles
+#' @return NULL (invisibly)
 #' @export
 run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscription_feeds = list(), fediverse_handles = c()) {
     message("--- Initializing Pipeline Run (In-Memory Processing & Quick Commit) ---")
@@ -59,8 +63,8 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
     
     existing_uids <- existing_res$uid
     
-    # 2. Ingest raw items from sources
-    raw_items <- list()
+    # 2. Ingest raw items from sources into temporary lists
+    raw_lists <- list()
     
     # A. Fetch Gmail newsletters if credentials configured
     if (config$gmail_username != "" && config$gmail_app_password != "") {
@@ -72,8 +76,7 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
             return(list())
         })
         if (length(gmail_recs) > 0) {
-            gmail_recs <- lapply(gmail_recs, function(x) { x$platform <- "email"; x })
-            raw_items <- c(raw_items, gmail_recs)
+            raw_lists[[length(raw_lists) + 1]] <- gmail_recs
         }
     }
     
@@ -88,8 +91,7 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
                 return(list())
             })
             if (length(rss_recs) > 0) {
-                rss_recs <- lapply(rss_recs, function(x) { x$platform <- "rss"; x })
-                raw_items <- c(raw_items, rss_recs)
+                raw_lists[[length(raw_lists) + 1]] <- rss_recs
             }
         }
     }
@@ -105,8 +107,7 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
                 return(list())
             })
             if (length(tg_recs) > 0) {
-                tg_recs <- lapply(tg_recs, function(x) { x$platform <- "telegram"; x })
-                raw_items <- c(raw_items, tg_recs)
+                raw_lists[[length(raw_lists) + 1]] <- tg_recs
             }
         }
     }
@@ -122,8 +123,7 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
                 return(list())
             })
             if (length(sub_recs) > 0) {
-                sub_recs <- lapply(sub_recs, function(x) { x$platform <- "subscription"; x })
-                raw_items <- c(raw_items, sub_recs)
+                raw_lists[[length(raw_lists) + 1]] <- sub_recs
             }
         }
     }
@@ -139,11 +139,13 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
                 return(list())
             })
             if (length(fedi_recs) > 0) {
-                fedi_recs <- lapply(fedi_recs, function(x) { x$platform <- "fediverse"; x })
-                raw_items <- c(raw_items, fedi_recs)
+                raw_lists[[length(raw_lists) + 1]] <- fedi_recs
             }
         }
     }
+    
+    # Flatten lists into raw_items
+    raw_items <- if (length(raw_lists) > 0) do.call(c, raw_lists) else list()
     
     if (length(raw_items) == 0) {
         message("\nNo new raw items fetched from any sources. Pipeline execution complete.")
@@ -155,6 +157,12 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
     # Filter duplicates in-memory
     is_new <- sapply(raw_items, function(item) !(item$uid %in% existing_uids))
     raw_items <- raw_items[is_new]
+    
+    # Deduplicate within the new batch itself to prevent PRIMARY KEY violations
+    if (length(raw_items) > 0) {
+        uids <- sapply(raw_items, function(x) x$uid)
+        raw_items <- raw_items[!duplicated(uids)]
+    }
     
     if (length(raw_items) == 0) {
         message("All fetched raw items already exist in the database. Pipeline complete.")
@@ -187,7 +195,13 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
         user_prompt <- construct_analysis_user_prompt(item$title, item$sender, content_to_llm)
         
         llm_resp <- tryCatch({
-            generate_completion(user_prompt, system_prompt = sys_prompt, json_mode = TRUE, config = config)
+            generate_completion(
+                user_prompt, 
+                system_prompt = sys_prompt, 
+                json_mode = TRUE, 
+                config = config,
+                image_url = item$image_url
+            )
         }, error = function(e) {
             message("LLM Extraction failed for article: ", item$title, ". Error: ", e$message)
             return(NULL)
@@ -208,10 +222,59 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
         
         if (is.null(parsed_analysis)) next
         
-        # Enforce summary_orig = summary_en programmatically when detected_language == "en"
-        if (!is.null(parsed_analysis$detected_language) && parsed_analysis$detected_language == "en") {
+        # Check if vision model indicated that the content contains no readable text
+        contains_text <- parsed_analysis$contains_text
+        if (!is.null(contains_text) && is.logical(contains_text) && !contains_text) {
+            message("Vision model detected no readable text/document data in the image. Bypassing translation.")
+            parsed_analysis$summary_en <- "*(Media post containing no readable text)*"
+            parsed_analysis$summary_orig <- "*(Media post containing no readable text)*"
+            parsed_analysis$detected_language <- "en"
+            parsed_analysis$entities <- data.frame(
+                raw_name = character(0),
+                canonical_name = character(0),
+                entity_type = character(0),
+                stringsAsFactors = FALSE
+            )
+        }
+        
+        # 5. Translate using appropriate model based on language
+        detected_language <- parsed_analysis$detected_language
+        if (is.null(detected_language) || length(detected_language) == 0) {
+            detected_language <- "en"
+        }
+        
+        # Ensure we always keep original summary
+        if (is.null(parsed_analysis$summary_orig) || length(parsed_analysis$summary_orig) == 0) {
             parsed_analysis$summary_orig <- parsed_analysis$summary_en
         }
+        
+        if (detected_language %in% low_res_langs) {
+            translation <- tryCatch({
+                translate_ollama(parsed_analysis$summary_orig, detected_language, model_name = config$translation_model)
+            }, error = function(e) {
+                message("Ollama translation failed: ", e$message)
+                translate_generic(parsed_analysis$summary_orig, detected_language, config)
+            })
+            parsed_analysis$summary_en <- translation
+        } else if (detected_language != "en") {
+            translation <- translate_generic(parsed_analysis$summary_orig, detected_language, config)
+            parsed_analysis$summary_en <- translation
+        } else {
+            parsed_analysis$summary_orig <- parsed_analysis$summary_en
+        }
+
+        # If the content was parsed from an image and contains text, add a footnote
+        has_image <- !is.null(item$image_url) && !is.na(item$image_url) && item$image_url != ""
+        is_textful_image <- has_image && (is.null(contains_text) || (is.logical(contains_text) && contains_text))
+        
+        if (is_textful_image) {
+            note <- "\n\n*(Note: This content was extracted via multimodal LLM analysis from a shared image.)*"
+            parsed_analysis$summary_en <- paste0(parsed_analysis$summary_en, note)
+            if (parsed_analysis$summary_orig != parsed_analysis$summary_en) {
+                parsed_analysis$summary_orig <- paste0(parsed_analysis$summary_orig, note)
+            }
+        }
+
         
         # 6. Generate Vector Embeddings
         topics_str <- paste(parsed_analysis$topics, collapse = ", ")
@@ -235,9 +298,10 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
         
         # Multilingual Vector (embeds original language summary + topics + themes)
         message("Generating Multilingual summary embedding...")
-        orig_summary_txt <- ifelse(!is.null(parsed_analysis$summary_orig) && parsed_analysis$summary_orig != "",
-                                   parsed_analysis$summary_orig,
-                                   parsed_analysis$summary_en)
+        orig_summary_txt <- paste(parsed_analysis$summary_orig, collapse = " ")
+        if (is.null(orig_summary_txt) || nchar(trimws(orig_summary_txt)) == 0 || orig_summary_txt == "NULL") {
+            orig_summary_txt <- paste(parsed_analysis$summary_en, collapse = " ")
+        }
         embedding_text_orig <- paste0(
             orig_summary_txt,
             "\nTopics: ", topics_str,
@@ -263,10 +327,15 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
         # Enforce platform tagging based on actual ingestion tool/source type
         pub_plat <- if (!is.null(item$platform)) item$platform else parsed_analysis$publisher_metadata$platform
         
-        # Fallbacks
-        if (is.null(pub_author) || is.na(pub_author)) pub_author <- "Unknown"
-        if (is.null(pub_pub) || is.na(pub_pub)) pub_pub <- item$source
-        if (is.null(pub_plat) || is.na(pub_plat)) pub_plat <- item$source
+        # Fallbacks and vector flattening
+        if (is.null(pub_author) || length(pub_author) == 0 || all(is.na(pub_author))) pub_author <- "Unknown"
+        else pub_author <- paste(pub_author, collapse = ", ")
+        
+        if (is.null(pub_pub) || length(pub_pub) == 0 || all(is.na(pub_pub))) pub_pub <- item$source
+        else pub_pub <- paste(pub_pub, collapse = ", ")
+        
+        if (is.null(pub_plat) || length(pub_plat) == 0 || all(is.na(pub_plat))) pub_plat <- item$source
+        else pub_plat <- paste(pub_plat, collapse = ", ")
         
         # We need to construct the lists as comma separated strings
         topics_str <- paste(parsed_analysis$topics, collapse = ", ")
@@ -295,9 +364,9 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
             sender = item$sender,
             title = item$title,
             url = item$url,
-            summary = parsed_analysis$summary_en,
-            original_language_summary = parsed_analysis$summary_orig,
-            detected_language = parsed_analysis$detected_language,
+            summary = paste(parsed_analysis$summary_en, collapse = "\n"),
+            original_language_summary = paste(parsed_analysis$summary_orig, collapse = "\n"),
+            detected_language = paste(parsed_analysis$detected_language, collapse = " "),
             truncated = truncated_flag,
             content_type = pub_plat,
             topics = topics_str,
@@ -306,7 +375,11 @@ run_pipeline <- function(rss_feeds = list(), telegram_channels = c(), subscripti
             subscription_marketing = as.logical(parsed_analysis$subscription_marketing),
             english_embedding = en_embed,
             multilingual_embedding = multiling_embed,
-            raw_email = if (!is.null(item$raw_email)) item$raw_email else NA_character_,
+            raw_email = if (!is.null(item$raw_source)) item$raw_source else if (!is.null(item$body)) item$body else NA_character_,
+            # Keep entities as a parsed data frame (columns: raw_name, entity_type).
+            # This is processed row-by-row on db commit via resolve_and_store_entities()
+            # rather than inserted into the 'newsletters' table, which resolves
+            # any length mismatch issues in db transactions.
             entities = parsed_analysis$entities
         )
         message("Record fully processed in-memory: ", item$title)

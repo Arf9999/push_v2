@@ -4,10 +4,10 @@
 .Ruserdata
 .venv/
 *.db
+*.duckdb
 *.rds
 *.log
-scratch/newsletter_capture_temp/
-scratch/retool_search_temp/
+scratch/
 __pycache__/
 *.pyc
 rollout_plan/
@@ -17,3 +17,5 @@ alpha/credentials.json
 FORENSIC_LOG
 *.txt
 *.eml
+alpha/mzansilm/
+

@@ -132,7 +132,7 @@ def generate_completion(prompt, system_prompt=None, json_mode=False, config=None
                     body = {
                         "model": model,
                         "messages": messages,
-                        "max_tokens": 1500
+                        "max_tokens": 4000
                     }
                     if json_mode:
                         body["response_format"] = {"type": "json_object"}

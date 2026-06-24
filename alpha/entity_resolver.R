@@ -5,92 +5,35 @@
 #'
 #' @importFrom DBI dbGetQuery dbExecute
 #' @importFrom stringr str_to_lower str_trim
+#' @importFrom stringdist stringsim
 #' @importFrom dplyr %>%
 #' @export
 
-#' Compute Jaro Distance between two strings
+#' Compute Jaro Similarity between two strings
 #'
 #' @param str1 First string.
 #' @param str2 Second string.
-#' @return Jaro distance value (0 to 1).
+#' @return Jaro similarity value (0 to 1).
 jaro_distance <- function(str1, str2) {
     if (is.null(str1) || is.na(str1) || is.null(str2) || is.na(str2)) return(0)
-    s1 <- strsplit(str1, "")[[1]]
-    s2 <- strsplit(str2, "")[[1]]
-    l1 <- length(s1)
-    l2 <- length(s2)
-    
-    if (l1 == 0 || l2 == 0) return(0)
-    
-    match_window <- max(1, floor(max(l1, l2) / 2) - 1)
-    
-    s1_matches <- rep(FALSE, l1)
-    s2_matches <- rep(FALSE, l2)
-    
-    matches <- 0
-    for (i in seq_along(s1)) {
-        start <- max(1, i - match_window)
-        end <- min(l2, i + match_window)
-        if (start <= end) {
-            for (j in start:end) {
-                if (!s2_matches[j] && s1[i] == s2[j]) {
-                    s1_matches[i] <- TRUE
-                    s2_matches[j] <- TRUE
-                    matches <- matches + 1
-                    break
-                }
-            }
-        }
-    }
-    
-    if (matches == 0) return(0)
-    
-    k <- 1
-    transpositions <- 0
-    for (i in seq_along(s1)) {
-        if (s1_matches[i]) {
-            while (!s2_matches[k]) {
-                k <- k + 1
-            }
-            if (s1[i] != s2[k]) {
-                transpositions <- transpositions + 1
-            }
-            k <- k + 1
-        }
-    }
-    
-    t <- transpositions / 2
-    jaro <- (matches/l1 + matches/l2 + (matches - t)/matches) / 3
-    return(jaro)
+    if (nchar(str1) == 0 || nchar(str2) == 0) return(0)
+    sim <- stringdist::stringsim(str1, str2, method = "jw", p = 0)
+    if (is.na(sim)) return(0)
+    return(sim)
 }
 
-#' Compute Jaro-Winkler Distance between two strings
+#' Compute Jaro-Winkler Similarity between two strings
 #'
 #' @param str1 First string.
 #' @param str2 Second string.
 #' @param p Scaling factor (default = 0.1).
-#' @return Jaro-Winkler distance value (0 to 1).
+#' @return Jaro-Winkler similarity value (0 to 1).
 jaro_winkler <- function(str1, str2, p = 0.1) {
     if (is.null(str1) || is.na(str1) || is.null(str2) || is.na(str2)) return(0)
-    j <- jaro_distance(str1, str2)
-    
-    s1_chars <- strsplit(str1, "")[[1]]
-    s2_chars <- strsplit(str2, "")[[1]]
-    min_l <- min(4, length(s1_chars), length(s2_chars))
-    
-    prefix_len <- 0
-    if (min_l > 0) {
-        for (i in 1:min_l) {
-            if (s1_chars[i] == s2_chars[i]) {
-                prefix_len <- prefix_len + 1
-            } else {
-                break
-            }
-        }
-    }
-    
-    jw <- j + prefix_len * p * (1 - j)
-    return(jw)
+    if (nchar(str1) == 0 || nchar(str2) == 0) return(0)
+    sim <- stringdist::stringsim(str1, str2, method = "jw", p = p)
+    if (is.na(sim)) return(0)
+    return(sim)
 }
 
 #' Resolve an Entity to its Canonical Name

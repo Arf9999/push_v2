@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-
+from alpha.search_parser import build_sql_from_query
 # Load environment variables from .env
 load_dotenv()
 
@@ -238,19 +238,22 @@ def get_db_con():
         con = duckdb.connect(DB_PATH)
         con.close()
         
-    for _ in range(10):
+    for _ in range(20):
         try:
             con = duckdb.connect(DB_PATH, read_only=True)
             con.execute("SET max_memory = '2GB';")
             con.execute("SET threads = 2;")
             return con
         except duckdb.IOException as e:
-            if "Conflicting lock is held" in str(e):
+            if "Conflicting lock is held" in str(e) or "lock" in str(e).lower():
                 import time
-                time.sleep(0.5)
+                time.sleep(1.0)
                 continue
             raise
-    raise Exception("Database is locked by background ingestion script.")
+    raise HTTPException(
+        status_code=503,
+        detail="Database temporarily locked by background ingestion. Please retry in a few seconds."
+    )
 
 # ---------------------------------------------------------
 # API Pydantic Schemas
@@ -275,6 +278,9 @@ class SavedSearchCreateSchema(BaseModel):
 # ---------------------------------------------------------
 # API Routes
 # ---------------------------------------------------------
+class FlagRequest(BaseModel):
+    flag_status: Optional[str] = None
+
 @app.post("/api/auth/register")
 async def register(schema: UserRegisterSchema):
     username = schema.username.strip()
@@ -577,12 +583,40 @@ async def check_notifications(username: str = Depends(get_current_user)):
         conn.commit()
     except Exception as e:
         conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Batch check failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         con.close()
         conn.close()
         
     return {"message": "Notifications check completed"}
+
+@app.post("/api/newsletters/{uid}/flag")
+async def flag_newsletter(uid: str, req: FlagRequest, current_user: str = Depends(get_current_user)):
+    # Open connection in read/write mode to update the flag
+    import time
+    for attempt in range(10):
+        try:
+            con = duckdb.connect(DB_PATH, read_only=False)
+            break
+        except Exception as e:
+            if attempt == 9:
+                raise HTTPException(status_code=503, detail="Database is locked by ingestion pipeline. Please try again in a few seconds.")
+            time.sleep(1.0)
+            
+    try:
+        # Verify it exists
+        exists = con.execute("SELECT 1 FROM newsletters WHERE uid = ?", [uid]).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Newsletter not found")
+        
+        con.execute("UPDATE newsletters SET flag_status = ? WHERE uid = ?", [req.flag_status, uid])
+        return {"success": True, "flag_status": req.flag_status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        con.close()
 
 # ---------------------------------------------------------
 # API Routes
@@ -595,51 +629,100 @@ async def root():
 @app.get("/api/search")
 async def search_newsletters(
     q: str = Query(..., description="Query terms to search"),
+    search_type: str = Query("semantic", regex="^(semantic|keyword)$", description="Type of search"),
     space: str = Query("english", regex="^(english|multilingual)$"),
     content_type: Optional[str] = Query(None, description="Filter by type of publication"),
     sort_by: str = Query("similarity", regex="^(similarity|date)$", description="Sort by similarity or date"),
     start_date: Optional[str] = Query(None, description="Filter start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="Filter end date (YYYY-MM-DD)"),
-    limit: int = Query(20, ge=1, le=100)
+    limit: int = Query(20, ge=1, le=10000),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    threshold: float = Query(0.0, ge=0.0, le=1.0, description="Minimum similarity threshold"),
+    language: Optional[str] = Query(None, description="Filter by original language code")
 ):
     """
     Endpoint for SQL-native vector similarity search using list_dot_product.
+    Returns paginated results plus a total_count of all matching records.
     """
-    # 1. Vectorize query string
-    query_vector = await vectorize_query(q)
-    
-    # Compute L2 Norm of query vector: sqrt(sum(x^2))
-    query_norm = math.sqrt(sum(x * x for x in query_vector))
-    if query_norm == 0:
-        query_norm = 1.0
-        
     embedding_col = "english_embedding" if space == "english" else "multilingual_embedding"
     
     # Build dynamic query and parameters
-    params = [query_vector, query_norm]
-    where_clauses = [f"{embedding_col} IS NOT NULL"]
+    filter_params = []
+    where_clauses = []
+        
+    where_clauses.append(f"{embedding_col} IS NOT NULL")
+    
+    # Similarity expression and ordering depend on search type
+    if search_type == "keyword":
+        similarity_select = "1.0 as similarity"
+        bool_sql, bool_params = build_sql_from_query(q, space)
+        where_clauses.append(bool_sql)
+        filter_params.extend(bool_params)
+        order_clause = "datetime DESC"
+    else:
+        # 1. Vectorize query string
+        query_vector = await vectorize_query(q)
+        
+        # Compute L2 Norm of query vector: sqrt(sum(x^2))
+        query_norm = math.sqrt(sum(x * x for x in query_vector))
+        if query_norm == 0:
+            query_norm = 1.0
+            
+        similarity_select = f"(list_dot_product({embedding_col}, ?) / (sqrt(list_dot_product({embedding_col}, {embedding_col})) * ?)) as similarity"
+        
+        # Apply threshold filtering at the database level
+        if threshold > 0:
+            where_clauses.append(f"(list_dot_product({embedding_col}, ?) / (sqrt(list_dot_product({embedding_col}, {embedding_col})) * ?)) >= ?")
+            filter_params.extend([query_vector, query_norm, threshold])
+            
+        order_clause = "similarity DESC" if sort_by == "similarity" else "datetime DESC"
     
     if content_type and content_type.lower() != "all":
         types_list = [t.strip().lower() for t in content_type.split(",") if t.strip()]
         if types_list and "all" not in types_list:
             placeholders = ", ".join("?" for _ in types_list)
             where_clauses.append(f"content_type IN ({placeholders})")
-            params.extend(types_list)
+            filter_params.extend(types_list)
         
     if start_date:
         where_clauses.append("datetime >= ?")
-        params.append(start_date)
+        filter_params.append(start_date)
         
     if end_date:
         where_clauses.append("datetime <= ?")
-        params.append(end_date)
+        filter_params.append(end_date)
+        
+    if language and language.lower() != "all":
+        where_clauses.append("detected_language = ?")
+        filter_params.append(language.lower())
         
     where_str = " AND ".join(where_clauses)
-    order_clause = "similarity DESC" if sort_by == "similarity" else "datetime DESC, similarity DESC"
     
-    # 2. Run query in DuckDB
+    # 2. Run queries in DuckDB
     con = get_db_con()
     try:
+        # --- COUNT query: get the total number of matching records ---
+        count_query = f"SELECT COUNT(*) FROM newsletters WHERE {where_str}"
+        total_count = con.execute(count_query, filter_params).fetchone()[0]
+        
+        # --- TIMELINE query: date distribution of ALL matching records ---
+        timeline_query = f"""
+            SELECT datetime::DATE::VARCHAR as dt, COUNT(*) as cnt
+            FROM newsletters
+            WHERE {where_str}
+            GROUP BY datetime::DATE
+            ORDER BY dt;
+        """
+        timeline_rows = con.execute(timeline_query, filter_params).fetchall()
+        timeline_data = [{"date": row[0], "count": row[1]} for row in timeline_rows]
+        
+        # --- Main results query with LIMIT/OFFSET ---
+        # For semantic search, the similarity SELECT needs its own params
+        # prepended before the filter params.
+        select_params = []
+        if search_type != "keyword":
+            select_params.extend([query_vector, query_norm])
+        
         search_query = f"""
             SELECT 
                 uid, 
@@ -655,17 +738,19 @@ async def search_newsletters(
                 topics, 
                 themes, 
                 keywords,
-                (list_dot_product({embedding_col}, ?) / (sqrt(list_dot_product({embedding_col}, {embedding_col})) * ?)) as similarity,
+                {similarity_select},
                 (SELECT string_agg(canonical_name || ':' || entity_type, ';') FROM entities WHERE entities.uid = newsletters.uid) as entity_list,
-                (raw_email IS NOT NULL AND raw_email != '') as has_raw_email
+                (raw_email IS NOT NULL AND raw_email != '') as has_raw_email,
+                flag_status
             FROM newsletters
             WHERE {where_str}
             ORDER BY {order_clause}
-            LIMIT ?;
+            LIMIT ?
+            OFFSET ?;
         """
-        params.append(limit)
+        all_params = select_params + filter_params + [limit, offset]
         
-        results = con.execute(search_query, params).fetchall()
+        results = con.execute(search_query, all_params).fetchall()
         
         newsletters = []
         for r in results:
@@ -692,10 +777,19 @@ async def search_newsletters(
                 "keywords": [t.strip() for t in r[12].split(",")] if r[12] else [],
                 "similarity": float(r[13]) if r[13] is not None and not math.isnan(r[13]) else 0.0,
                 "entities": entities,
-                "has_raw_email": bool(r[15])
+                "has_raw_email": bool(r[15]),
+                "flag_status": r[16]
             })
             
-        return {"query": q, "space": space, "results": newsletters}
+        return {
+            "query": q,
+            "space": space,
+            "total_count": total_count,
+            "offset": offset,
+            "limit": limit,
+            "timeline": timeline_data,
+            "results": newsletters
+        }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
@@ -705,26 +799,34 @@ async def search_newsletters(
 @app.get("/api/newsletters/{uid}/download-eml")
 async def download_eml(uid: str):
     """
-    Endpoint to download the raw MIME email payload as a .eml file.
+    Endpoint to download the raw payload (MIME email or plain text for RSS/Telegram).
     """
     con = get_db_con()
     try:
-        res = con.execute("SELECT raw_email, title FROM newsletters WHERE uid = ?;", [uid]).fetchone()
+        res = con.execute("SELECT raw_email, title, content_type FROM newsletters WHERE uid = ?;", [uid]).fetchone()
         if not res or not res[0]:
-            raise HTTPException(status_code=404, detail="Raw email content not found for this record.")
+            raise HTTPException(status_code=404, detail="Raw content not found for this record.")
         
         raw_email_content = res[0]
-        title = res[1] or "email"
+        title = res[1] or "content"
+        content_type = (res[2] or "email").lower()
+        
+        # Determine if this is an email or plain text source
+        is_email = content_type in ["email", "gmail", "imap"]
         
         # Sanitize title to use as filename
         safe_title = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
-        safe_title = safe_title[:50] or "email"
-        filename = f"{safe_title}.eml"
+        safe_title = safe_title[:50] or "download"
+        
+        extension = ".eml" if is_email else ".txt"
+        mime_type = "message/rfc822" if is_email else "text/plain"
+        
+        filename = f"{safe_title}{extension}"
         
         headers = {
             "Content-Disposition": f'attachment; filename="{filename}"'
         }
-        return Response(content=raw_email_content, media_type="message/rfc822", headers=headers)
+        return Response(content=raw_email_content, media_type=mime_type, headers=headers)
     except HTTPException:
         raise
     except Exception as e:
@@ -780,6 +882,26 @@ async def get_stats():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch database metrics: {str(e)}")
+    finally:
+        con.close()
+@app.get("/api/languages")
+async def get_languages():
+    """
+    Fetch distinct detected languages present in the database.
+    """
+    con = get_db_con()
+    try:
+        lang_rows = con.execute("""
+            SELECT DISTINCT detected_language 
+            FROM newsletters 
+            WHERE detected_language IS NOT NULL AND detected_language != ''
+            ORDER BY detected_language ASC;
+        """).fetchall()
+        
+        languages = [row[0] for row in lang_rows]
+        return {"languages": languages}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch languages: {str(e)}")
     finally:
         con.close()
 

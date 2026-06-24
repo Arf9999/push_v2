@@ -54,14 +54,33 @@ fetch_telegram_channel <- function(channel_name) {
     
     records <- list()
     for (node in msg_nodes) {
-        # 1. Extract message text
-        text_node <- rvest::html_node(node, ".tgme_widget_message_text")
-        if (is.na(text_node)) next # Skip service messages/empty posts
-        text <- rvest::html_text(text_node)
-        text <- stringr::str_squish(text)
-        if (text == "") next
+        # 1. Extract image URL if present
+        img_url <- NULL
+        photo_node <- rvest::html_node(node, ".tgme_widget_message_photo_wrap")
+        if (!is.na(photo_node)) {
+            style_attr <- rvest::html_attr(photo_node, "style")
+            if (!is.na(style_attr)) {
+                img_url_match <- regmatches(style_attr, regexec("background-image:\\s*url\\(\\s*['\"]?(.*?)['\"]?\\s*\\)", style_attr))
+                if (length(img_url_match[[1]]) >= 2) {
+                    img_url <- img_url_match[[1]][2]
+                }
+            }
+        }
         
-        # 2. Extract datetime attribute from time tag
+        # 2. Locate message text node
+        text_node <- rvest::html_node(node, ".tgme_widget_message_text")
+        
+        # If there is neither text nor image, skip the post (e.g. service messages or empty nodes)
+        if (is.na(text_node) && is.null(img_url)) next
+        
+        raw_text <- ""
+        text <- ""
+        if (!is.na(text_node)) {
+            raw_text <- rvest::html_text(text_node)
+            text <- stringr::str_squish(raw_text)
+        }
+        
+        # 3. Extract datetime attribute from time tag
         time_node <- rvest::html_node(node, "time")
         date_str <- rvest::html_attr(time_node, "datetime")
         
@@ -70,12 +89,13 @@ fetch_telegram_channel <- function(channel_name) {
         }, error = function(e) Sys.time())
         if (is.na(parsed_dt)) parsed_dt <- Sys.time()
         
-        # 3. Extract direct link to message
+        # 4. Extract direct link to message
         link_node <- rvest::html_node(node, ".tgme_widget_message_date")
         msg_link <- rvest::html_attr(link_node, "href")
         if (is.na(msg_link) || msg_link == "") {
-            # Generate dummy link based on text hash
-            msg_link <- paste0("https://t.me/", channel_name, "/", digest::digest(text, algo = "md5"))
+            # Generate dummy link based on text/image hash
+            h_val <- if (text != "") text else img_url
+            msg_link <- paste0("https://t.me/", channel_name, "/", digest::digest(h_val, algo = "md5"))
         }
         
         uid <- digest::digest(msg_link, algo = "md5")
@@ -87,7 +107,10 @@ fetch_telegram_channel <- function(channel_name) {
             sender = channel_name,
             title = paste0("Telegram Post - @", channel_name),
             url = msg_link,
-            body = text
+            body = text,
+            platform = "telegram",
+            raw_source = if (raw_text != "") raw_text else "[Photo-Only Update]",
+            image_url = img_url
         )
     }
     

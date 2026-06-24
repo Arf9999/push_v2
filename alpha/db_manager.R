@@ -11,8 +11,22 @@ get_db_connection <- function(db_path) {
     # Ensure parent directory exists
     dir.create(dirname(db_path), recursive = TRUE, showWarnings = FALSE)
     
-    # Establish connection
-    con <- DBI::dbConnect(duckdb::duckdb(), db_path)
+    # Establish connection with retry logic for DuckDB locks
+    con <- NULL
+    for (i in 1:60) {
+        tryCatch({
+            con <- DBI::dbConnect(duckdb::duckdb(), db_path)
+            break
+        }, error = function(e) {
+            if (grepl("lock", tolower(e$message))) {
+                if (i == 60) stop("Database locked for too long: ", e$message)
+                message("Database is locked (attempt ", i, "/60). Retrying in 1 second...")
+                Sys.sleep(1)
+            } else {
+                stop("Database connection failed: ", e$message)
+            }
+        })
+    }
     
     # Enforce memory and thread safety constraints for resource-constrained VMs
     DBI::dbExecute(con, "SET max_memory = '1.5GB';")
@@ -59,6 +73,10 @@ init_db <- function(con) {
         message("Migration: Adding 'url' column to existing newsletters table.")
         DBI::dbExecute(con, "ALTER TABLE newsletters ADD COLUMN url VARCHAR;")
     }
+    if (!("flag_status" %in% cols$name)) {
+        message("Migration: Adding 'flag_status' column to existing newsletters table.")
+        DBI::dbExecute(con, "ALTER TABLE newsletters ADD COLUMN flag_status VARCHAR DEFAULT NULL;")
+    }
     if (!("raw_email" %in% cols$name)) {
         message("Migration: Adding 'raw_email' column to existing newsletters table.")
         DBI::dbExecute(con, "ALTER TABLE newsletters ADD COLUMN raw_email TEXT;")
@@ -72,8 +90,7 @@ init_db <- function(con) {
             uid VARCHAR,
             entity_type VARCHAR,
             raw_name VARCHAR,
-            canonical_name VARCHAR,
-            FOREIGN KEY (uid) REFERENCES newsletters(uid)
+            canonical_name VARCHAR
         );
     ")
     

@@ -606,6 +606,14 @@ body {
     background: rgba(139, 92, 246, 0.15);
 }
 
+.highlight-keyword {
+    background-color: rgba(234, 179, 8, 0.2);
+    color: #fde047;
+    padding: 0 2px;
+    border-radius: 2px;
+    font-weight: 600;
+}
+
 /* Empty State / Placeholders */
 .empty-state {
     padding: 60px;
@@ -1155,4 +1163,107 @@ body {
     color: var(--text-secondary);
     border-top: 1px solid var(--border-color);
     background: rgba(9, 13, 26, 0.9);
+}
+
+/* Pagination Controls */
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 20px 0;
+    margin-top: 8px;
+}
+
+.pagination-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: var(--transition);
+}
+
+.pagination-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+}
+
+.pagination-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.pagination-info {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 0 8px;
+}
+
+/* Custom Tooltip */
+.custom-tooltip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: help;
+}
+
+.custom-tooltip .tooltip-text {
+    visibility: hidden;
+    width: 280px;
+    background-color: rgba(15, 23, 42, 0.98);
+    color: #fff;
+    text-align: left;
+    border-radius: 8px;
+    padding: 10px 14px;
+    position: absolute;
+    z-index: 100;
+    bottom: 150%;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.2s, visibility 0.2s;
+    font-size: 12px;
+    line-height: 1.5;
+    font-family: var(--font-body);
+    font-weight: 400;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.4);
+    pointer-events: none;
+}
+
+.custom-tooltip .tooltip-text::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -6px;
+    border-width: 6px;
+    border-style: solid;
+    border-color: rgba(16, 185, 129, 0.4) transparent transparent transparent;
+}
+
+.custom-tooltip:hover .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Make date picker calendar icon visible on dark background */
+input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    opacity: 0.7;
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
 }

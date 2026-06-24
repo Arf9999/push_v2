@@ -1,9 +1,16 @@
 // Dashboard State Management
 let activeSearchSpace = "english";
+let activeSearchMode = "semantic";
 let languagesChart = null;
 let resultsTimelineChart = null;
 let rawSearchResults = [];
 let currentSearchResults = [];
+
+// Pagination State
+let currentSearchOffset = 0;
+let currentSearchTotalCount = 0;
+let currentSearchTimeline = [];
+const PAGE_SIZE = 20;
 
 // Auth & Personalization State
 let currentUser = localStorage.getItem("username") || null;
@@ -18,11 +25,57 @@ document.addEventListener("DOMContentLoaded", () => {
     setupEventListeners();
 });
 
+async function toggleFlag(uid) {
+    const btn = document.getElementById(`flag-btn-${uid}`);
+    if (!btn) return;
+    
+    // Read current state from data attribute
+    const currentState = btn.dataset.flagStatus || 'null';
+    let newState = 'Flagged';
+    if (currentState === 'Flagged') {
+        newState = null;
+    }
+    
+    // Optimistic UI update
+    btn.dataset.flagStatus = newState || 'null';
+    if (newState === 'Flagged') {
+        btn.style.color = '#ef4444'; // Red
+    } else if (newState === 'Cleared') {
+        btn.style.color = '#10b981'; // Green
+    } else {
+        btn.style.color = 'var(--text-secondary)'; // Gray
+    }
+    
+    try {
+        const response = await fetch(`/api/newsletters/${uid}/flag`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify({ flag_status: newState })
+        });
+        
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    } catch (error) {
+        console.error("Failed to update flag status:", error);
+        // Revert
+        btn.dataset.flagStatus = currentState;
+        if (currentState === 'Flagged') btn.style.color = '#ef4444';
+        else if (currentState === 'Cleared') btn.style.color = '#10b981';
+        else btn.style.color = 'var(--text-secondary)';
+    }
+}
+
 // Load stats and chart on initialization
 async function initApp() {
     await fetchStats();
     await fetchEntitiesCloud();
+    await fetchLanguages();
     updateAuthUI();
+    
+    // Initialize UI state
+    setActiveMode(activeSearchMode);
 }
 
 // Helper for HTTP Headers
@@ -38,6 +91,12 @@ function setupEventListeners() {
     const btnExportCsv = document.getElementById("btn-export-csv");
     const sensitivitySlider = document.getElementById("sensitivity-slider");
     const sensitivityValue = document.getElementById("sensitivity-value");
+
+    const modeSemantic = document.getElementById("mode-semantic");
+    const modeKeyword = document.getElementById("mode-keyword");
+    const btnSyntaxHelp = document.getElementById("btn-syntax-help");
+    const btnCloseSyntax = document.getElementById("btn-close-syntax");
+    const syntaxModal = document.getElementById("syntax-help-modal");
 
     // Auth Modal DOM Elements
     const btnShowAuth = document.getElementById("btn-show-auth");
@@ -70,6 +129,22 @@ function setupEventListeners() {
         setActiveSpace("multilingual");
     });
 
+    modeSemantic.addEventListener("click", () => {
+        setActiveMode("semantic");
+    });
+
+    modeKeyword.addEventListener("click", () => {
+        setActiveMode("keyword");
+    });
+
+    btnSyntaxHelp.addEventListener("click", () => {
+        syntaxModal.style.display = syntaxModal.style.display === "none" ? "block" : "none";
+    });
+
+    btnCloseSyntax.addEventListener("click", () => {
+        syntaxModal.style.display = "none";
+    });
+
     // Type pills listeners
     document.querySelectorAll(".type-pill-btn").forEach(btn => {
         btn.addEventListener("click", () => {
@@ -94,15 +169,35 @@ function setupEventListeners() {
             exportCurrentResultsToCSV();
         });
     }
+    
+    // Language filter event listener
+    const filterLanguage = document.getElementById("filter-language");
+    if (filterLanguage) {
+        filterLanguage.addEventListener("change", () => {
+            const searchInput = document.getElementById("search-input");
+            if (searchInput && searchInput.value.trim() !== "") {
+                executeSearch(true);
+            }
+        });
+    }
 
     // Sensitivity slider event listener
     if (sensitivitySlider) {
         sensitivitySlider.addEventListener("input", (e) => {
             const val = e.target.value;
             if (sensitivityValue) sensitivityValue.innerText = `${val}%`;
-            
-            // Re-render search results in real-time
-            renderSearchResults(rawSearchResults);
+        });
+        
+        sensitivitySlider.addEventListener("change", (e) => {
+            // Re-fetch from backend when user releases the slider
+            const searchInput = document.getElementById("search-input");
+            if (searchInput && searchInput.value.trim() !== "") {
+                const searchMode = document.querySelector('.search-type-toggle .btn-toggle.active')?.dataset.mode || "semantic";
+                if (searchMode === "semantic") {
+                    // Reset pagination when threshold changes
+                    executeSearch(true);
+                }
+            }
         });
     }
 
@@ -225,6 +320,31 @@ function setActiveSpace(space) {
     }
 }
 
+function setActiveMode(mode) {
+    activeSearchMode = mode;
+    document.getElementById("mode-semantic").classList.toggle("active", mode === "semantic");
+    document.getElementById("mode-keyword").classList.toggle("active", mode === "keyword");
+    
+    const semanticGroup = document.getElementById("semantic-controls-group");
+    const sortBy = document.getElementById("sort-by");
+    
+    if (mode === "keyword") {
+        semanticGroup.style.opacity = "0.3";
+        semanticGroup.style.pointerEvents = "none";
+        sortBy.value = "date";
+    } else {
+        semanticGroup.style.opacity = "1";
+        semanticGroup.style.pointerEvents = "auto";
+        sortBy.value = "similarity";
+    }
+    
+    // Auto re-execute search if input is populated
+    const query = document.getElementById("search-input").value.trim();
+    if (query) {
+        executeSearch();
+    }
+}
+
 // Fetch stats and update UI + Chart
 async function fetchStats() {
     try {
@@ -298,6 +418,40 @@ function renderLanguagesChart(languageData) {
     });
 }
 
+const languageNames = new Intl.DisplayNames(['en'], { type: 'language' });
+
+async function fetchLanguages() {
+    try {
+        const response = await fetch("/api/languages");
+        if (!response.ok) throw new Error("Failed to fetch languages");
+        
+        const data = await response.json();
+        const langDropdown = document.getElementById("filter-language");
+        if (!langDropdown) return;
+        
+        langDropdown.innerHTML = '<option value="all">All</option>';
+        
+        if (data.languages && data.languages.length > 0) {
+            data.languages.forEach(langCode => {
+                let displayName = langCode.toUpperCase();
+                try {
+                    displayName = languageNames.of(langCode);
+                    displayName = displayName.charAt(0).toUpperCase() + displayName.slice(1) + ` (${langCode.toUpperCase()})`;
+                } catch (e) {
+                    displayName = langCode.toUpperCase();
+                }
+                
+                const option = document.createElement("option");
+                option.value = langCode;
+                option.textContent = displayName;
+                langDropdown.appendChild(option);
+            });
+        }
+    } catch (err) {
+        console.error("Error loading languages:", err);
+    }
+}
+
 // Fetch and render top deduplicated entities
 async function fetchEntitiesCloud() {
     try {
@@ -359,8 +513,8 @@ function triggerFilter(value) {
 }
 
 // Execute semantic search query
-// Execute semantic search query
-async function executeSearch() {
+async function executeSearch(resetPage = true) {
+    if (resetPage) currentSearchOffset = 0;
     const queryInput = document.getElementById("search-input");
     const query = queryInput.value.trim();
     if (!query) return;
@@ -375,6 +529,7 @@ async function executeSearch() {
     const sortBy = document.getElementById("sort-by")?.value || "similarity";
     const startDate = document.getElementById("filter-start-date")?.value || "";
     const endDate = document.getElementById("filter-end-date")?.value || "";
+    const filterLanguage = document.getElementById("filter-language")?.value || "all";
     
     // Reset save search star indicator
     const btnSaveSearch = document.getElementById("btn-save-search");
@@ -397,8 +552,12 @@ async function executeSearch() {
         </div>
     `;
     
+    // Get threshold from slider (used both for the API call and display)
+    const sensitivitySlider = document.getElementById("sensitivity-slider");
+    const sliderValue = sensitivitySlider ? parseFloat(sensitivitySlider.value) / 100 : 0.40;
+    
     try {
-        let url = `/api/search?q=${encodeURIComponent(query)}&space=${activeSearchSpace}&sort_by=${sortBy}&limit=20`;
+        let url = `/api/search?q=${encodeURIComponent(query)}&search_type=${activeSearchMode}&space=${activeSearchSpace}&sort_by=${sortBy}&limit=${PAGE_SIZE}&offset=${currentSearchOffset}&threshold=${sliderValue}`;
         if (filterType !== "all") {
             url += `&content_type=${encodeURIComponent(filterType)}`;
         }
@@ -408,16 +567,27 @@ async function executeSearch() {
         if (endDate) {
             url += `&end_date=${encodeURIComponent(endDate)}`;
         }
+        if (filterLanguage !== "all") {
+            url += `&language=${encodeURIComponent(filterLanguage)}`;
+        }
         
         const response = await fetch(url);
         
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || "Query failed");
+            let errorMsg = `Server error (${response.status})`;
+            try {
+                const errorData = await response.json();
+                errorMsg = errorData.detail || errorMsg;
+            } catch (_) {
+                errorMsg = response.statusText || errorMsg;
+            }
+            throw new Error(errorMsg);
         }
         
         const data = await response.json();
         rawSearchResults = data.results || [];
+        currentSearchTotalCount = data.total_count || 0;
+        currentSearchTimeline = data.timeline || [];
         renderSearchResults(rawSearchResults);
         
         // Log search history asynchronously if logged in
@@ -461,44 +631,61 @@ function renderSearchResults(results) {
     resultsList.innerHTML = "";
     
     const sliderValue = sensitivitySlider ? parseFloat(sensitivitySlider.value) / 100 : 0.40;
-    const filteredResults = (results || []).filter(rec => rec.similarity >= sliderValue);
-    currentSearchResults = filteredResults;
+    // Threshold filtering is now done server-side, so we use results directly
+    currentSearchResults = results || [];
     
     if (!results || results.length === 0) {
         if (btnExportCsv) btnExportCsv.style.display = "none";
-        resultsCount.innerText = "0 matches found";
-        resultsList.innerHTML = `
-            <div class="empty-state">
-                <i class="fa-solid fa-face-frown empty-icon"></i>
-                <p>No matches found. Try refining your keywords or query idea.</p>
-            </div>
-        `;
-        const card = document.getElementById("results-timeline-card");
-        if (card) card.style.display = "none";
-        return;
-    }
-    
-    if (filteredResults.length === 0) {
-        if (btnExportCsv) btnExportCsv.style.display = "none";
-        resultsCount.innerText = `0 matches above threshold (Threshold: ${Math.round(sliderValue * 100)}%)`;
-        resultsList.innerHTML = `
-            <div class="empty-state">
-                <i class="fa-solid fa-sliders empty-icon"></i>
-                <p>No matches found with similarity >= ${Math.round(sliderValue * 100)}%. Try lowering the sensitivity slider.</p>
-            </div>
-        `;
+        if (currentSearchTotalCount === 0) {
+            resultsCount.innerText = "0 matches found";
+            resultsList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fa-solid fa-face-frown empty-icon"></i>
+                    <p>No matches found. Try refining your keywords or query idea.</p>
+                </div>
+            `;
+        } else {
+            resultsCount.innerText = `0 matches above threshold (Threshold: ${Math.round(sliderValue * 100)}%)`;
+            resultsList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fa-solid fa-sliders empty-icon"></i>
+                    <p>No matches found with similarity >= ${Math.round(sliderValue * 100)}%. Try lowering the sensitivity slider.</p>
+                </div>
+            `;
+        }
         const card = document.getElementById("results-timeline-card");
         if (card) card.style.display = "none";
         return;
     }
     
     if (btnExportCsv) btnExportCsv.style.display = "flex";
-    resultsCount.innerText = `Found ${filteredResults.length} matches (Threshold: ${Math.round(sliderValue * 100)}%)`;
     
-    // Render the results timeline chart
-    renderResultsTimelineChart(filteredResults);
+    // Show total count with pagination info
+    const pageStart = currentSearchOffset + 1;
+    const pageEnd = currentSearchOffset + currentSearchResults.length;
+    const thresholdLabel = activeSearchMode === "semantic" ? ` (Threshold: ${Math.round(sliderValue * 100)}%)` : "";
+    resultsCount.innerText = `Found ${currentSearchTotalCount.toLocaleString()} matches${thresholdLabel} — showing ${pageStart}–${pageEnd}`;
     
-    filteredResults.forEach(rec => {
+    // Render the results timeline chart from server-side timeline data
+    renderResultsTimelineChart(currentSearchTimeline);
+    
+    // Setup keyword highlighting for keyword search mode
+    let keywords = [];
+    if (activeSearchMode === "keyword") {
+        const query = document.getElementById("search-input").value.trim();
+        let cleaned = query.replace(/\b(AND|OR|NOT|NEAR\(\d+\))\b/ig, ' ').replace(/[()'"\-]/g, ' ');
+        const words = cleaned.match(/\b\w{3,}\b/g) || [];
+        keywords = [...new Set(words)];
+    }
+
+    function highlightText(text, kws) {
+        if (!text || kws.length === 0) return text;
+        const escaped = kws.map(kw => kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const pattern = new RegExp(`(${escaped.join('|')})`, 'gi');
+        return String(text).replace(pattern, '<span class="highlight-keyword">$&</span>');
+    }
+    
+    currentSearchResults.forEach(rec => {
         const card = document.createElement("article");
         card.className = "article-card glass-panel animate-fade-in";
         
@@ -518,29 +705,46 @@ function renderSearchResults(results) {
             `).join("");
         }
         
+        let displayTitle = rec.title;
+        let displaySummary = rec.summary;
+        let displayOrigSummary = rec.original_language_summary;
+        
+        if (keywords.length > 0) {
+            displayTitle = highlightText(displayTitle, keywords);
+            displaySummary = highlightText(displaySummary, keywords);
+            if (displayOrigSummary) {
+                displayOrigSummary = highlightText(displayOrigSummary, keywords);
+            }
+        }
+        
         // Card Body structure
         card.innerHTML = `
             <div class="article-meta">
                 <div class="meta-left">
-                    <span class="source-badge">${rec.source}</span>
+                    <span class="source-badge">${rec.source ? rec.source.replace('Investigative Online Limited', 'IOL') : 'Unknown'}</span>
                     <span class="lang-badge">${rec.detected_language}</span>
                     <span class="date-text">${rec.datetime.split(" ")[0]}</span>
                     <span class="uid-badge" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">ID: ${rec.uid}</span>
                     ${rec.url && rec.url !== "NA" && rec.url !== "" ? 
                       `<a href="${rec.url}" target="_blank" rel="noopener noreferrer" class="meta-url-link" style="color: var(--color-primary, #10b981); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500;"><i class="fa-solid fa-link"></i> Source</a>` : ""}
                 </div>
-                <div class="similarity-badge">
-                    <span>${similarityPct}% match</span>
-                    <div class="similarity-bar">
-                        <div class="similarity-fill" style="width: ${similarityPct}%"></div>
+                <div class="meta-right" style="display: flex; align-items: center; gap: 12px;">
+                    <button onclick="toggleFlag('${rec.uid}')" id="flag-btn-${rec.uid}" class="flag-btn" data-flag-status="${rec.flag_status || 'null'}" style="background: none; border: none; cursor: pointer; color: ${rec.flag_status === 'Flagged' ? '#ef4444' : (rec.flag_status === 'Cleared' ? '#10b981' : 'var(--text-secondary)')}; font-size: 12px;" title="${rec.flag_status === 'Cleared' ? 'Reprocessed successfully' : 'Flag garbled or hallucinated text for reprocessing'}">
+                        <i class="fa-solid ${rec.flag_status === 'Cleared' ? 'fa-flag-checkered' : 'fa-flag'}"></i>
+                    </button>
+                    <div class="similarity-badge">
+                        <span>${similarityPct}% match</span>
+                        <div class="similarity-bar">
+                            <div class="similarity-fill" style="width: ${similarityPct}%"></div>
+                        </div>
                     </div>
                 </div>
             </div>
             
             <h3 class="article-title">
                 ${rec.url && rec.url !== "NA" && rec.url !== "" ? 
-                  `<a href="${rec.url}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none; border-bottom: 1px dashed transparent; transition: border-color 0.2s;" onmouseover="this.style.borderColor='currentColor'" onmouseout="this.style.borderColor='transparent'">${rec.title} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.75em; opacity: 0.8; margin-left: 4px;"></i></a>` : 
-                  rec.title}
+                  `<a href="${rec.url}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none; border-bottom: 1px dashed transparent; transition: border-color 0.2s;" onmouseover="this.style.borderColor='currentColor'" onmouseout="this.style.borderColor='transparent'">${displayTitle} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.75em; opacity: 0.8; margin-left: 4px;"></i></a>` : 
+                  displayTitle}
             </h3>
             
             ${rec.url && rec.url !== "NA" && rec.url !== "" ? 
@@ -553,10 +757,10 @@ function renderSearchResults(results) {
             <div class="article-summary-box">
                 <div class="summary-heading">
                     <h4 id="summary-title-${rec.uid}">English Summary</h4>
-                    ${rec.detected_language !== "en" && rec.original_language_summary ? 
+                    ${rec.detected_language !== "en" && displayOrigSummary ? 
                       `<button class="summary-toggle-btn" id="toggle-btn-${rec.uid}" data-state="en">Show Original</button>` : ""}
                 </div>
-                <p class="summary-text" id="summary-txt-${rec.uid}">${rec.summary}</p>
+                <p class="summary-text" id="summary-txt-${rec.uid}">${displaySummary}</p>
             </div>
             
             <div class="tags-row" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
@@ -575,19 +779,19 @@ function renderSearchResults(results) {
         resultsList.appendChild(card);
         
         // Set up Summary Toggle handler if multilingual
-        if (rec.detected_language !== "en" && rec.original_language_summary) {
+        if (rec.detected_language !== "en" && displayOrigSummary) {
             const toggleBtn = card.querySelector(`#toggle-btn-${rec.uid}`);
             const summaryText = card.querySelector(`#summary-txt-${rec.uid}`);
             const summaryTitle = card.querySelector(`#summary-title-${rec.uid}`);
             
             toggleBtn.addEventListener("click", () => {
                 if (toggleBtn.dataset.state === "en") {
-                    summaryText.innerText = rec.original_language_summary;
+                    summaryText.innerHTML = displayOrigSummary;
                     summaryTitle.innerText = "Original Language Summary";
                     toggleBtn.innerText = "Show English";
                     toggleBtn.dataset.state = "orig";
                 } else {
-                    summaryText.innerText = rec.summary;
+                    summaryText.innerHTML = displaySummary;
                     summaryTitle.innerText = "English Summary";
                     toggleBtn.innerText = "Show Original";
                     toggleBtn.dataset.state = "en";
@@ -604,58 +808,126 @@ function renderSearchResults(results) {
             window.open(`/api/newsletters/${uid}/download-eml`, "_blank");
         });
     });
+    
+    // Render pagination controls if there are more results than one page
+    if (currentSearchTotalCount > PAGE_SIZE) {
+        const totalPages = Math.ceil(currentSearchTotalCount / PAGE_SIZE);
+        const currentPage = Math.floor(currentSearchOffset / PAGE_SIZE) + 1;
+        const hasPrev = currentSearchOffset > 0;
+        const hasNext = (currentSearchOffset + PAGE_SIZE) < currentSearchTotalCount;
+        
+        const paginationDiv = document.createElement("div");
+        paginationDiv.className = "pagination-controls";
+        paginationDiv.innerHTML = `
+            <button class="pagination-btn" ${!hasPrev ? "disabled" : ""} onclick="loadSearchPage(0)" title="First page">
+                <i class="fa-solid fa-angles-left"></i>
+            </button>
+            <button class="pagination-btn" ${!hasPrev ? "disabled" : ""} onclick="loadSearchPage(${currentSearchOffset - PAGE_SIZE})" title="Previous page">
+                <i class="fa-solid fa-chevron-left"></i> Prev
+            </button>
+            <span class="pagination-info">Page ${currentPage} of ${totalPages.toLocaleString()}</span>
+            <button class="pagination-btn" ${!hasNext ? "disabled" : ""} onclick="loadSearchPage(${currentSearchOffset + PAGE_SIZE})" title="Next page">
+                Next <i class="fa-solid fa-chevron-right"></i>
+            </button>
+            <button class="pagination-btn" ${!hasNext ? "disabled" : ""} onclick="loadSearchPage(${(totalPages - 1) * PAGE_SIZE})" title="Last page">
+                <i class="fa-solid fa-angles-right"></i>
+            </button>
+        `;
+        resultsList.appendChild(paginationDiv);
+    }
 }
 
 // Export current search results to CSV
-function exportCurrentResultsToCSV() {
-    if (!currentSearchResults || currentSearchResults.length === 0) return;
+async function exportCurrentResultsToCSV() {
+    const query = document.getElementById("search-input").value.trim();
+    if (!query) return;
+
+    showToast("Preparing CSV export...", "success");
+
+    // Gather same parameters as executeSearch()
+    const space = activeSearchSpace;
+    const typeFilters = Array.from(document.querySelectorAll(".type-pill-btn.active")).map(btn => btn.dataset.type);
+    const content_type = typeFilters.length > 0 ? typeFilters.join(",") : "all";
+    const sort_by = document.getElementById("sort-by")?.value || "similarity";
+    const start_date = document.getElementById("filter-start-date")?.value || "";
+    const end_date = document.getElementById("filter-end-date")?.value || "";
     
-    // Define headers
-    const headers = [
-        "UID",
-        "Date",
-        "Source",
-        "Sender",
-        "Title",
-        "URL",
-        "English Summary",
-        "Original Summary",
-        "Detected Language",
-        "Content Type",
-        "Topics",
-        "Themes",
-        "Keywords",
-        "Cosine Similarity Score",
-        "Resolved Entities"
-    ];
+    const params = new URLSearchParams({
+        q: query,
+        search_type: activeSearchMode,
+        space: space,
+        content_type: content_type,
+        sort_by: sort_by,
+        limit: 10000,
+        offset: 0
+    });
     
-    // Construct CSV lines
-    const csvRows = [headers.join(",")];
+    if (start_date) params.append("start_date", start_date);
+    if (end_date) params.append("end_date", end_date);
+    if (activeSearchMode === "semantic") {
+        const sensitivitySlider = document.getElementById("sensitivity-slider");
+        const sliderValue = sensitivitySlider ? parseFloat(sensitivitySlider.value) / 100 : 0.40;
+        params.append("threshold", sliderValue.toFixed(2));
+    }
     
-    currentSearchResults.forEach(item => {
-        const row = [
-            item.uid || "",
-            item.datetime || "",
-            item.source || "",
-            item.sender || "",
-            item.title || "",
-            item.url || "",
-            item.summary || "",
-            item.original_language_summary || "",
-            item.detected_language || "",
-            item.content_type || "",
-            (item.topics || []).join(";"),
-            (item.themes || []).join(";"),
-            (item.keywords || []).join(";"),
-            item.similarity !== undefined ? item.similarity.toFixed(4) : "",
-            (item.entities || []).map(e => `${e.name}:${e.type}`).join(";")
+    try {
+        const response = await fetch(`/api/search?${params.toString()}`);
+        if (!response.ok) throw new Error("Export fetch failed");
+        
+        const data = await response.json();
+        const exportResults = data.results;
+        
+        if (!exportResults || exportResults.length === 0) {
+            showToast("No data to export", "error");
+            return;
+        }
+        
+        // Define headers
+        const headers = [
+            "UID",
+            "Date",
+            "Source",
+            "Sender",
+            "Title",
+            "URL",
+            "English Summary",
+            "Original Summary",
+            "Detected Language",
+            "Content Type",
+            "Topics",
+            "Themes",
+            "Keywords",
+            "Cosine Similarity Score",
+            "Resolved Entities"
         ];
         
-        // Escape CSV values
-        const escapedRow = row.map(val => {
-            const strVal = String(val).replace(/"/g, '""');
-            return `"${strVal}"`;
-        });
+        // Construct CSV lines
+        const csvRows = [headers.join(",")];
+        
+        exportResults.forEach(item => {
+            const row = [
+                item.uid || "",
+                item.datetime || "",
+                item.source || "",
+                item.sender || "",
+                item.title || "",
+                item.url || "",
+                item.summary || "",
+                item.original_language_summary || "",
+                item.detected_language || "",
+                item.content_type || "",
+                (item.topics || []).join(";"),
+                (item.themes || []).join(";"),
+                (item.keywords || []).join(";"),
+                item.similarity !== undefined ? item.similarity.toFixed(4) : "",
+                (item.entities || []).map(e => `${e.name}:${e.type}`).join(";")
+            ];
+            
+            // Escape CSV values
+            const escapedRow = row.map(val => {
+                const strVal = String(val).replace(/"/g, '""');
+                return `"${strVal}"`;
+            });
         
         csvRows.push(escapedRow.join(","));
     });
@@ -667,14 +939,19 @@ function exportCurrentResultsToCSV() {
     const link = document.createElement("a");
     
     // Form filename with search term and timestamp
-    const query = document.getElementById("search-input").value.trim().replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const searchTypeStr = activeSearchMode === "semantic" ? "V" : "K";
+    const querySlug = document.getElementById("search-input").value.trim().replace(/[^a-z0-9]/gi, '_').toLowerCase() || "results";
     const timestamp = new Date().toISOString().slice(0, 10);
     link.setAttribute("href", url);
-    link.setAttribute("download", `narrative_search_${query || "results"}_${timestamp}.csv`);
+    link.setAttribute("download", `Search_${searchTypeStr}_${querySlug}_${timestamp}.csv`);
     link.style.visibility = "hidden";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    } catch (err) {
+        console.error("CSV Export Error:", err);
+        showToast("Failed to download export", "error");
+    }
 }
 
 // Floating Toast Notification
@@ -1226,11 +1503,11 @@ async function triggerBatchCheck() {
 }
 
 // Render Results Timeline Chart using Chart.js
-function renderResultsTimelineChart(filteredResults) {
+function renderResultsTimelineChart(timelineData) {
     const card = document.getElementById("results-timeline-card");
     if (!card) return;
 
-    if (!filteredResults || filteredResults.length === 0) {
+    if (!timelineData || timelineData.length === 0) {
         card.style.display = "none";
         return;
     }
@@ -1238,18 +1515,42 @@ function renderResultsTimelineChart(filteredResults) {
     // Show the card
     card.style.display = "block";
 
-    // Aggregate counts by date
-    const dateCounts = {};
-    filteredResults.forEach(rec => {
-        if (rec.datetime) {
-            const dateStr = rec.datetime.split(" ")[0]; // YYYY-MM-DD
-            dateCounts[dateStr] = (dateCounts[dateStr] || 0) + 1;
-        }
-    });
+    // Helper to add days to a date string
+    function addDays(dateStr, days) {
+        const d = new Date(dateStr + "T00:00:00Z");
+        d.setDate(d.getDate() + days);
+        return d.toISOString().split("T")[0];
+    }
 
-    // Sort dates chronologically
-    const sortedDates = Object.keys(dateCounts).sort();
-    const counts = sortedDates.map(d => dateCounts[d]);
+    // 1. Sort data by date
+    timelineData.sort((a, b) => a.date.localeCompare(b.date));
+    
+    // 2. Map existing counts
+    const countMap = {};
+    timelineData.forEach(d => countMap[d.date] = d.count);
+    
+    // 3. Generate continuous date range
+    const startStr = timelineData[0].date;
+    const endStr = timelineData[timelineData.length - 1].date;
+    const continuousData = [];
+    
+    let currentStr = startStr;
+    while (currentStr <= endStr) {
+        continuousData.push({
+            date: currentStr,
+            count: countMap[currentStr] || 0
+        });
+        currentStr = addDays(currentStr, 1);
+    }
+    
+    // 4. Extract data arrays
+    const sortedDates = [];
+    const counts = [];
+    
+    for (let i = 0; i < continuousData.length; i++) {
+        sortedDates.push(continuousData[i].date);
+        counts.push(continuousData[i].count);
+    }
 
     const ctx = document.getElementById("results-timeline-chart").getContext("2d");
 
@@ -1273,9 +1574,9 @@ function renderResultsTimelineChart(filteredResults) {
                 borderWidth: 2,
                 backgroundColor: gradient,
                 fill: true,
-                tension: 0.3,
+                tension: 0.4, // Visual cubic bezier smoothing
                 pointBackgroundColor: "#10B981",
-                pointRadius: 3,
+                pointRadius: sortedDates.length > 60 ? 0 : 3,
                 pointHoverRadius: 5
             }]
         },
@@ -1303,6 +1604,7 @@ function renderResultsTimelineChart(filteredResults) {
                     },
                     ticks: {
                         color: "#9CA3AF",
+                        maxTicksLimit: 12,
                         font: {
                             family: "Outfit",
                             size: 10
@@ -1313,7 +1615,6 @@ function renderResultsTimelineChart(filteredResults) {
                     beginAtZero: true,
                     ticks: {
                         color: "#9CA3AF",
-                        stepSize: 1,
                         font: {
                             family: "Outfit",
                             size: 10
@@ -1326,5 +1627,10 @@ function renderResultsTimelineChart(filteredResults) {
             }
         }
     });
+}
+
+async function loadSearchPage(newOffset) {
+    currentSearchOffset = newOffset;
+    await executeSearch(false);
 }
 

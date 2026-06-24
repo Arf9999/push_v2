@@ -61,6 +61,12 @@ get_config <- function() {
     # Forensic Logging configuration
     forensic_log_path <- Sys.getenv("FORENSIC_LOG_PATH", unset = "FORENSIC_LOG")
     
+    # Translation model configuration
+    translation_model <- Sys.getenv("TRANSLATION_MODEL", unset = "mzansilm")
+    
+    # Vision model configuration
+    vision_model <- Sys.getenv("VISION_MODEL", unset = "qwen/qwen3.6-plus")
+    
     config <- list(
         gmail_username = gmail_username,
         gmail_app_password = gmail_app_password,
@@ -75,8 +81,11 @@ get_config <- function() {
         gemini_api_key = gemini_api_key,
         gcs_bucket_name = gcs_bucket_name,
         last_email_id_file = last_email_id_file,
-        forensic_log_path = forensic_log_path
+        forensic_log_path = forensic_log_path,
+        translation_model = translation_model,
+        vision_model = vision_model
     )
     
     return(config)
 }
+
