@@ -4,16 +4,33 @@ This document explains the **strategic reasoning, trade-offs, and design decisio
 
 ---
 
-## 1. Central Configuration Manifest (`manifest.json`)
-The pipeline's model dependency mappings are isolated in a declarative, project-level manifest file (`manifest.json`). 
+## 1. Central Configuration Manifest (`manifest.json`) & Model Hierarchy
+The pipeline's model dependency mappings are declared in a project-level manifest file (`manifest.json`), working in tandem with the environmental configuration layer (`config.R`) and translation module (`translation_ollama.R`) to establish a resilient, multi-tiered model hierarchy.
 
-### The Settings:
-- **`metadata_extraction`**: Specifies the primary LLM provider and model (e.g., OpenRouter's `liquid/lfm-2-24b-a2b`) responsible for language detection, translation, summarization, structured entity extraction, and classification.
-- **`vector_embeddings`**: Establishes the provider and model (e.g., Ollama's `nomic-embed-text:latest`) used to vectorize textual descriptions, producing the dual 768-dimensional float arrays stored in the database.
-- **`translation_evaluation`**: Declares the LLM-as-a-judge model used to programmatically audit translation quality, accuracy, and rhetorical preservation.
+### Granular Settings & Model Roles:
+1. **Main LLM (`metadata_extraction`)**:
+   - **Declared In**: `manifest.json` under `pipeline_models.metadata_extraction`.
+   - **Default Model**: `liquid/lfm-2-24b-a2b` (via OpenRouter).
+   - **Role**: Serves as the primary workhorse of the ingestion pipeline. It performs initial text parsing, language detection, translation (for high-resource languages), English summarization, structured entity extraction, and category classification.
+2. **Low-Resource Local LLM (`translation_model`)**:
+   - **Declared In**: Configured via the `TRANSLATION_MODEL` environment variable (parsed in `config.R` with a default fallback to the local `mzansilm` model).
+   - **Active Models**: Dedicated local translation models (such as `afriqueqwen-14b-multiturn` or `mzansilm` running locally via Ollama).
+   - **Role**: Invoked specifically when the pipeline detects low-resource regional African languages (`xh`, `zu`, `tn`, `rw`, `st`, `ss`, `wo`) to translate summaries locally while preserving rhetorical idioms and regional vocabulary.
+3. **Failover LLM (Secondary Translation Model)**:
+   - **Declared In**: Hardcoded as the ultimate API translation fallback (`qwen/qwen3.6-plus` via OpenRouter) in `translation_ollama.R`'s `translate_generic()` function.
+   - **Role**: Automatically engaged if the primary model fails or returns empty/untranslated output during translation tasks, ensuring the pipeline recovers gracefully without user intervention.
+4. **Vector Embedding Model (`vector_embeddings`)**:
+   - **Declared In**: `manifest.json` under `pipeline_models.vector_embeddings`.
+   - **Default Model**: `nomic-embed-text:latest` (via Ollama).
+   - **Role**: Vectorizes text summaries to generate dual 768-dimensional float arrays (multilingual original and English) for semantic vector search.
+5. **Translation Quality Evaluator (`translation_evaluation`)**:
+   - **Declared In**: `manifest.json` under `pipeline_models.translation_evaluation`.
+   - **Default Model**: `liquid/lfm-2-24b-a2b` (via OpenRouter).
+   - **Role**: An LLM-as-a-judge model used to programmatically audit translation quality, accuracy, and semantic alignment during verification phases.
 
 ### The Rationale:
-- **Model Agnosticism**: Standardizing API communications through a unified adapter allows administrators to update models, change vendors (e.g., from an external API provider to a local model running on Ollama), or upgrade versions by modifying a single configuration file without altering any R or Python code in the ingestion pipeline.
+- **Model Agnosticism & Tiered Resilience**: Standardizing API communications through a unified adapter allows administrators to update models, change vendors (e.g., from an external API provider to a local model running on Ollama), or upgrade versions by modifying `manifest.json` without altering any R or Python code in the ingestion pipeline.
+- **Failover Autonomy**: If external APIs face rate limits or network dropouts, the system falls back to secondary alternatives. If both primary and fallback cloud endpoints fail entirely during ingestion, the translation layer prepends a `[Translation Failed - Original Language: {lang}]` warning header to prevent database poisoning and silent omissions.
 - **Operational Decoupling**: Hardcoding provider properties inside ingest scripts leads to configuration drift and operational fragility. Consuming settings from `manifest.json` as runtime defaults ensures that pipeline components share a synchronized, single source of truth that is easily overridden via local environment variables during deployment.
 
 ---
