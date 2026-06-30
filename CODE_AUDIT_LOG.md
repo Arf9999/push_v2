@@ -316,3 +316,21 @@ All changes to core R/Python scripts and LLM prompts are logged here.
 - **Strategic Intent**: Removed the `FOREIGN KEY` constraint on the `entities(uid)` table to prevent DuckDB catalog assertion failures (`INTERNAL Error: Attempting to dereference an optional pointer that is not set` in `VerifyForeignKeyConstraint` during updates/deletes). DuckDB's internal implementation of `UPDATE` via `DELETE + INSERT` triggers buggy foreign key checks that permanently invalidate database files on disk under certain conditions. This structural change ensures reliable database writes and updates.
 
 
+## 2026-06-29
+
+### Transitioned Alpha Pipeline to Standalone Containerized Beta Release
+- **Files**: All pipeline and survey files copied from `alpha/` and `alpha_survey/` to `beta_pipeline/`, organized into `pipeline/` and `survey/` folders. Modified paths and imports to remove `alpha` prefix and route databases/logs through a shared volume `/app/data/`.
+- **Strategic Intent**: Promote the entire pipeline (ingestion, dashboard, and regional survey tool) to a containerized Beta release. Configured Dockerfiles and a `docker-compose.yml` to run the services in isolated environments, communicating through a shared Docker volume containing `sources.db`, `newsletters.db`, and `users.db`. Initialized a new Git repository under `beta_pipeline/` with commit messages prefix indicating `Beta`.
+
+## 2026-06-30
+
+### Hardened Container Portability, Environment Ingestion, and Model Routing
+- **Files**: `beta_pipeline/pipeline/install_packages.R`, `beta_pipeline/pipeline/requirements.txt`, `beta_pipeline/pipeline/run_cron.R`, `beta_pipeline/pipeline/translation_ollama.R`, `beta_pipeline/docker-compose.yml`, `beta_pipeline/pipeline/manifest.json`
+- **Strategic Intent**: Ensure seamless and crash-resistant execution inside isolated containers.
+  1. **Dependencies**: Added missing R packages (`RSQLite`, `httr2`, `XML` for HTML parsing/stripping, `lubridate`, `stringr`, `readr`, `magrittr`) and missing Python packages (`imapclient`) to ensure all imports resolve cleanly inside the container.
+  2. **Model Routing**: Copied `manifest.json` to the container to configure model routing so that embeddings are correctly routed through Ollama.
+  3. **Ollama Routing**: Configured the container's `docker-compose.yml` to route Ollama host API calls to `host.docker.internal` (mapping host-gateway) to connect to Ollama running on the host Mac from inside the Docker sandbox.
+  4. **Credential Isolation**: Modified `run_cron.R` to load environment variables from `credentials.json` only if they are not already defined, preventing hardcoded JSON values from overriding Docker Compose configurations.
+  5. **Dynamic Cache**: Updated `translation_ollama.R` to resolve the translation cache directory dynamically (checking for `/app/data/` first) and automatically create folders to avoid database connection failure crashes.
+  6. **Warning Cleanup**: Removed the deprecated `version` tag from `docker-compose.yml` to suppress console noise.
+
