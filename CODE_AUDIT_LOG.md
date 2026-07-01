@@ -334,3 +334,4 @@ All changes to core R/Python scripts and LLM prompts are logged here.
   5. **Dynamic Cache**: Updated `translation_ollama.R` to resolve the translation cache directory dynamically (checking for `/app/data/` first) and automatically create folders to avoid database connection failure crashes.
   6. **Warning Cleanup**: Removed the deprecated `version` tag from `docker-compose.yml` to suppress console noise.
 
+  7. **DuckDB Bind Parameter Fix**: Resolved a `rapi_bind` mismatch error by implementing safe parameter wrappers (`safe_param` and `safe_bool`) in `pipeline_runner.R`. This guarantees all scalar fields bound to the DuckDB query are strictly of length 1, preventing crashes when optional or logical fields (like `subscription_marketing`) return `NULL` or empty from the LLM parser.
